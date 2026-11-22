@@ -3,8 +3,8 @@
 Estimator / Projection Specification & Bias & RMSE & 95\% Cov. & $R^2(Z \mid R)$ \\
 \midrule
 Unadjusted OLS (no residual control $R_i$) & +0.773 & 0.776 & 0.000 & 0.00 \\
-DML with uncentered PCA $\hat{u}_{\rm PCA}$ (noise-corrupted) & -1.458 & 1.763 & 0.000 & 0.13 \\
-DML with mean-shift $\hat{u}_{\rm mean}$ (single concept) & +0.004 & 0.047 & 0.932 & 0.43 \\
+DML with uncentered PCA $\hat{u}_{\mathrm{PCA}}$ (noise-corrupted) & -1.458 & 1.763 & 0.000 & 0.13 \\
+DML with mean-shift $\hat{u}_{\mathrm{mean}}$ (single) & +0.004 & 0.047 & 0.932 & 0.43 \\
 Multi-concept DML, naive $U_k^\top h_i$ ($\cos\theta = 0.71$) & +1547.198 & 46245.698 & 1.000 & 1.00 \\
 Multi-concept DML, oblique $(U_k^\top U_k)^{-1}U_k^\top h_i$ & -0.002 & 0.037 & 0.938 & 0.16 \\
 \bottomrule

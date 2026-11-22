@@ -51,13 +51,15 @@ def estimate_stage1(delta_h, rng):
         cos_pca.append(principal_angle_cos(v1[:, -1], v2[:, -1]))
         cos_mean.append(principal_angle_cos(h1.mean(axis=1), h2.mean(axis=1)))
 
+    split_mean_val = float(np.mean(cos_mean))
     return {
         "u_pca": u_pca,
         "u_mean": u_mean,
         "r2_1": r2_pca,
         "centered_top_ratio": float(c_evals[0] / np.sum(c_evals)),
         "split_cos_pca": float(np.mean(cos_pca)),
-        "split_cos_mean": float(np.mean(cos_mean)),
+        "split_cos_mean": split_mean_val,
+        "pass_gate": float(split_mean_val >= 0.70),
     }
 
 
@@ -115,6 +117,7 @@ def run_simulations(n_sims=400, d=64, m=80, n=600, theta_true=1.5):
             "cos_mean_true": [],
             "split_pca": [],
             "split_mean": [],
+            "pass_gate": [],
         }
         for reg in ("clean", "high_var_noise", "curved_no_subspace")
     }
@@ -143,15 +146,15 @@ def run_simulations(n_sims=400, d=64, m=80, n=600, theta_true=1.5):
         amp_a = 1.0 + 0.2 * rng.randn(m)
         dh_clean = np.outer(u_c1, amp_a) + 0.15 * rng.randn(d, m)
         s1_clean = estimate_stage1(dh_clean, rng)
-        stage1_rows["clean"]["r2"].append(s1_clean["r2_1"])
-        stage1_rows["clean"]["cos_pca_true"].append(
-            principal_angle_cos(s1_clean["u_pca"], u_c1)
-        )
-        stage1_rows["clean"]["cos_mean_true"].append(
-            principal_angle_cos(s1_clean["u_mean"], u_c1)
-        )
-        stage1_rows["clean"]["split_pca"].append(s1_clean["split_cos_pca"])
-        stage1_rows["clean"]["split_mean"].append(s1_clean["split_cos_mean"])
+        row_a = stage1_rows["clean"]
+        row_a["r2"].append(s1_clean["r2_1"])
+        cp_a = principal_angle_cos(s1_clean["u_pca"], u_c1)
+        cm_a = principal_angle_cos(s1_clean["u_mean"], u_c1)
+        row_a["cos_pca_true"].append(cp_a)
+        row_a["cos_mean_true"].append(cm_a)
+        row_a["split_pca"].append(s1_clean["split_cos_pca"])
+        row_a["split_mean"].append(s1_clean["split_cos_mean"])
+        row_a["pass_gate"].append(s1_clean["pass_gate"])
 
         # Regime B: Mean shift along u_c1, high zero-mean noise along u_nuis
         dh_noisy = (
@@ -168,24 +171,21 @@ def run_simulations(n_sims=400, d=64, m=80, n=600, theta_true=1.5):
         row_b["cos_mean_true"].append(cm_b)
         row_b["split_pca"].append(s1_noisy["split_cos_pca"])
         row_b["split_mean"].append(s1_noisy["split_cos_mean"])
+        row_b["pass_gate"].append(s1_noisy["pass_gate"])
 
         # Regime C: Dispersed edit across 15 random directions (no subspace)
         rand_dirs = orthonormal_columns(d, 15, rng)
         dh_curved = rand_dirs @ rng.randn(15, m) + 0.2 * rng.randn(d, m)
         s1_curved = estimate_stage1(dh_curved, rng)
-        stage1_rows["curved_no_subspace"]["r2"].append(s1_curved["r2_1"])
-        stage1_rows["curved_no_subspace"]["cos_pca_true"].append(
-            principal_angle_cos(s1_curved["u_pca"], u_c1)
-        )
-        stage1_rows["curved_no_subspace"]["cos_mean_true"].append(
-            principal_angle_cos(s1_curved["u_mean"], u_c1)
-        )
-        stage1_rows["curved_no_subspace"]["split_pca"].append(
-            s1_curved["split_cos_pca"]
-        )
-        stage1_rows["curved_no_subspace"]["split_mean"].append(
-            s1_curved["split_cos_mean"]
-        )
+        row_c = stage1_rows["curved_no_subspace"]
+        row_c["r2"].append(s1_curved["r2_1"])
+        cp_c = principal_angle_cos(s1_curved["u_pca"], u_c1)
+        cm_c = principal_angle_cos(s1_curved["u_mean"], u_c1)
+        row_c["cos_pca_true"].append(cp_c)
+        row_c["cos_mean_true"].append(cm_c)
+        row_c["split_pca"].append(s1_curved["split_cos_pca"])
+        row_c["split_mean"].append(s1_curved["split_cos_mean"])
+        row_c["pass_gate"].append(s1_curved["pass_gate"])
 
         # --- Stage 2 Observational DGP (representation-level model Eq. 5) ---
         conf = rng.randn(n)
@@ -296,15 +296,15 @@ def run_simulations(n_sims=400, d=64, m=80, n=600, theta_true=1.5):
         )
         stage2_rows["dml_multi_oblique"]["r2_z"].append(r2_obl)
 
-    # Write Table 1 (Stage 1 diagnostics)
+    # Write Table 1 (Stage 1 diagnostics + Gate Pass %)
     t1_header = (
         r"Minimal-Pair Regime & $R_1^2$ & "
-        r"$\cos(\hat{u}_{\rm PCA}, u_C^*)$ & "
-        r"$\cos(\hat{u}_{\rm mean}, u_C^*)$ & "
-        r"Split (PCA) & Split (Mean) \\"
+        r"$\cos(\hat{u}_{\mathrm{PCA}}, u_C^*)$ & "
+        r"$\cos(\hat{u}_{\mathrm{mean}}, u_C^*)$ & "
+        r"Split (PCA) & Split (Mean) & Pass \\"
     )
     t1_lines = [
-        r"\begin{tabular}{@{}l rrrrr@{}}",
+        r"\begin{tabular}{@{}l rrrrrr@{}}",
         r"\toprule",
         t1_header,
         r"\midrule",
@@ -321,9 +321,11 @@ def run_simulations(n_sims=400, d=64, m=80, n=600, theta_true=1.5):
         cm_val = np.mean(d_row["cos_mean_true"])
         sp_val = np.mean(d_row["split_pca"])
         sm_val = np.mean(d_row["split_mean"])
+        pg_val = 100.0 * np.mean(d_row["pass_gate"])
+        pg_str = f"{pg_val:.0f}\\%"
         t1_lines.append(
             f"{label} & {r2_val:.2f} & {cp_val:.2f} & "
-            f"{cm_val:.2f} & {sp_val:.2f} & {sm_val:.2f} \\\\"
+            f"{cm_val:.2f} & {sp_val:.2f} & {sm_val:.2f} & {pg_str} \\\\"
         )
     t1_lines.extend([r"\bottomrule", r"\end{tabular}"])
     (TABS / "table1_stage1.tex").write_text("\n".join(t1_lines) + "\n")
@@ -339,8 +341,9 @@ def run_simulations(n_sims=400, d=64, m=80, n=600, theta_true=1.5):
         t2_header,
         r"\midrule",
     ]
-    lbl_pca = "DML with uncentered PCA $\\hat{u}_{\\rm PCA}$ (noise-corrupted)"
-    lbl_mean = "DML with mean-shift $\\hat{u}_{\\rm mean}$ (single concept)"
+    s_pca = "$\\hat{u}_{\\mathrm{PCA}}$"
+    lbl_pca = f"DML with uncentered PCA {s_pca} (noise-corrupted)"
+    lbl_mean = "DML with mean-shift $\\hat{u}_{\\mathrm{mean}}$ (single)"
     s_cos = "($\\cos\\theta = 0.71$)"
     lbl_inc = f"Multi-concept DML, naive $U_k^\\top h_i$ {s_cos}"
     lbl_obl = "Multi-concept DML, oblique $(U_k^\\top U_k)^{-1}U_k^\\top h_i$"

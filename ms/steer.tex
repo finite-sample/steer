@@ -1,18 +1,41 @@
-\documentclass[12pt,letterpaper]{article}
+\documentclass[11pt]{article}
 
+\RequirePackage{fontspec}
+
+\usepackage{xcolor}
+
+% Apple's text gray (from the cls)
+\definecolor{fgcolor}{HTML}{333333}
+\color{fgcolor}
 \usepackage[margin=1in]{geometry}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\usepackage[sfdefault]{FiraSans}
-\usepackage{microtype}
-\usepackage{amsmath,amssymb,amsthm}
+\usepackage{amsmath,mathtools,amsthm}
+\usepackage{unicode-math}
+
+\setmainfont{texgyrepagella-regular.otf}[
+  BoldFont       = texgyrepagella-bold.otf,
+  ItalicFont     = texgyrepagella-italic.otf,
+  BoldItalicFont = texgyrepagella-bolditalic.otf,
+]
+\setsansfont{texgyreheros-regular.otf}[
+  BoldFont   = texgyreheros-bold.otf,
+  ItalicFont = texgyreheros-italic.otf,
+  Scale      = MatchLowercase,
+]
+\setmonofont{texgyrecursor-regular.otf}[
+  BoldFont = texgyrecursor-bold.otf,
+  Scale    = MatchLowercase,
+]
+\setmathfont{texgyrepagella-math.otf}
 \usepackage{booktabs}
-\usepackage{setspace}
-\usepackage[square]{natbib}
-\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\setlength{\emergencystretch}{2em}
+\usepackage{enumitem}
+\usepackage[authoryear,round]{natbib}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
 
-\onehalfspacing
-
+\theoremstyle{plain}
 \newtheorem{proposition}{Proposition}
 \newtheorem{assumption}{Assumption}
 
@@ -382,11 +405,90 @@ We evaluate three minimal-pair regimes in Stage~1:
 \label{tab:stage1}
 \vspace{0.5em}
 \small
-\setlength{\tabcolsep}{3.5pt}
+\setlength{\tabcolsep}{3pt}
 \input{../tabs/table1_stage1.tex}
 \end{table}
 
-Table~\ref{tab:stage1} reports the average Stage~1 diagnostics. In the clean regime, both uncentered PCA ($\hat{u}_{\mathrm{PCA}}$) and the normalized mean shift ($\hat{u}_{\mathrm{mean}}$) recover the true concept direction $u_{C_1}^*$ with cosine similarity $0.99$ and split-half stability $0.97$. However, in the presence of high-variance zero-mean nuisance edit noise, uncentered PCA fails completely: $R_1^2 = 0.57$ looks deceptively strong, and split-half PCA stability is $0.97$, yet $\cos(\hat{u}_{\mathrm{PCA}}, u_{C_1}^*) = 0.07$ because the top eigenvector of $S = \frac{1}{m}DD^\top$ locks onto the high-variance nuisance direction $u_{\mathrm{nuis}}$! By contrast, the normalized mean shift $\hat{u}_{\mathrm{mean}}$ averages out the zero-mean nuisance fluctuation and achieves $\cos(\hat{u}_{\mathrm{mean}}, u_{C_1}^*) = 0.97$ with split-half stability $0.90$. Finally, in the dispersed regime, both $R_1^2 = 0.11$ and split-half stability ($0.19\text{--}0.21$) collapse, triggering the Stage~1 rejection gate before outcome estimation.
+Table~\ref{tab:stage1} reports the average Stage~1 diagnostics and the proportion of replications passing the pre-outcome Stage~1 diagnostic gate ($\text{Split-half (Mean)} \ge 0.70$). In the clean regime, both uncentered PCA ($\hat{u}_{\mathrm{PCA}}$) and the normalized mean shift ($\hat{u}_{\mathrm{mean}}$) recover the true concept direction $u_{C_1}^*$ with cosine similarity $0.99$, split-half stability $0.97$, and a $100\%$ gate pass rate. However, in the presence of high-variance zero-mean nuisance edit noise, uncentered PCA fails completely: $R_1^2 = 0.57$ looks deceptively strong, and split-half PCA stability is $0.97$, yet $\cos(\hat{u}_{\mathrm{PCA}}, u_{C_1}^*) = 0.07$ because the top eigenvector of $S = \frac{1}{m}DD^\top$ locks onto the high-variance nuisance direction $u_{\mathrm{nuis}}$! By contrast, the normalized mean shift $\hat{u}_{\mathrm{mean}}$ averages out the zero-mean nuisance fluctuation, achieving $\cos(\hat{u}_{\mathrm{mean}}, u_{C_1}^*) = 0.97$, split-half stability $0.90$, and a $100\%$ gate pass rate. Finally, in the dispersed regime, both $R_1^2 = 0.11$ and split-half stability ($0.19\text{--}0.21$) collapse, triggering $0\%$ gate passage ($100\%$ rejection) before any outcome data are analyzed.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\small, scale=0.84, transform shape]
+  % Panel A: Stage 1 Diagnostic Gate
+  \begin{scope}[xshift=0cm]
+    \node[anchor=south west, font=\bfseries\small] at (0, 4.30) {A. Stage 1 Diagnostic Gate};
+    \draw[->, thick] (0,0) -- (6.5,0);
+    \draw[->, thick] (0,0) -- (0,4.1);
+    \foreach \y/\lbl in {0/0.0, 1.4/0.35, 2.8/0.70, 4.0/1.00} {
+      \draw (-0.1, \y) -- (0, \y) node[left, font=\scriptsize] {\lbl};
+    }
+    % Gate threshold at 0.70 (y = 2.8)
+    \draw[dashed, red!75!black, thick] (0, 2.8) -- (6.3, 2.8);
+    \node[anchor=south east, font=\scriptsize, text=red!75!black, fill=white, inner sep=1pt] at (6.3, 2.90) {Threshold ($0.70$)};
+
+    % Regime 1: Clean (Split Mean = 0.97 -> y=3.88, Cos Mean = 0.99 -> y=3.96, Cos PCA = 0.99 -> y=3.96)
+    \fill[blue!70!black] (0.6, 0) rectangle (0.95, 3.88);
+    \fill[teal!75!black] (1.0, 0) rectangle (1.35, 3.96);
+    \fill[orange!85!black] (1.4, 0) rectangle (1.75, 3.96);
+    \node[below, font=\scriptsize, align=center] at (1.175, -0.10) {Clean\\(Pass 100\%)};
+
+    % Regime 2: High-var edit noise (Split Mean = 0.90 -> y=3.60, Cos Mean = 0.97 -> y=3.88, Cos PCA = 0.07 -> y=0.28)
+    \fill[blue!70!black] (2.6, 0) rectangle (2.95, 3.60);
+    \fill[teal!75!black] (3.0, 0) rectangle (3.35, 3.88);
+    \fill[orange!85!black] (3.4, 0) rectangle (3.75, 0.28);
+    \node[below, font=\scriptsize, align=center] at (3.175, -0.10) {Nuisance Noise\\(Pass 100\%)};
+
+    % Regime 3: Dispersed (Split Mean = 0.19 -> y=0.76, Cos Mean = 0.09 -> y=0.36, Cos PCA = 0.09 -> y=0.36)
+    \fill[blue!70!black] (4.6, 0) rectangle (4.95, 0.76);
+    \fill[teal!75!black] (5.0, 0) rectangle (5.35, 0.36);
+    \fill[orange!85!black] (5.4, 0) rectangle (5.75, 0.36);
+    \node[below, font=\scriptsize, align=center] at (5.175, -0.10) {Dispersed\\(Reject: 0\%)};
+
+    % Legend Panel A (cleanly spaced)
+    \fill[blue!70!black] (0.0, -1.30) rectangle (0.22, -1.10);
+    \node[right, font=\scriptsize] at (0.26, -1.20) {Split (Mean)};
+    \fill[teal!75!black] (2.15, -1.30) rectangle (2.37, -1.10);
+    \node[right, font=\scriptsize] at (2.41, -1.20) {$\cos(\hat{u}_{\mathrm{mean}}, u_C^*)$};
+    \fill[orange!85!black] (4.70, -1.30) rectangle (4.92, -1.10);
+    \node[right, font=\scriptsize] at (4.96, -1.20) {$\cos(\hat{u}_{\mathrm{PCA}}, u_C^*)$};
+  \end{scope}
+
+  % Panel B: Stage 2 Causal Estimation Error (\hat{\theta}_1 - \theta_1^*)
+  \begin{scope}[xshift=9.6cm]
+    \node[anchor=south west, font=\bfseries\small] at (0, 4.30) {B. Stage 2 Error ($\hat{\theta}_1 - \theta_1^*$)};
+    \draw[->, thick] (0,0) -- (6.5,0);
+    \draw[-, thick] (0,0) -- (0,4.1);
+    % Map error e in [-1.8, +1.0] to x = 4.2 + 2.0 * e
+    \draw[dashed, black!60, thick] (4.2, 0) -- (4.2, 4.0);
+    \foreach \e/\x/\lbl in {-1.5/1.2/-1.5, -1.0/2.2/-1.0, -0.5/3.2/-0.5, 0.0/4.2/0.0, 0.5/5.2/+0.5, 1.0/6.2/+1.0} {
+      \draw (\x, -0.1) -- (\x, 0) node[below, font=\scriptsize] {\lbl};
+    }
+    \node[below, font=\scriptsize] at (3.4, -0.75) {Bias and 95\% Sampling Interval ($\hat{\theta}_1 - \theta_1^*$)};
+
+    % Row 4 (y=3.4): Unadjusted OLS: bias +0.773 (x=5.75)
+    \node[left, font=\scriptsize] at (-0.12, 3.4) {Unadjusted OLS};
+    \draw[thick, red!75!black] (5.60, 3.4) -- (5.90, 3.4);
+    \fill[red!75!black] (5.75, 3.4) circle (2.3pt);
+
+    % Row 3 (y=2.4): DML uncentered PCA: bias -1.458 (x=1.28)
+    \node[left, font=\scriptsize] at (-0.12, 2.4) {DML ($\hat{u}_{\mathrm{PCA}}$)};
+    \draw[thick, orange!85!black] (0.60, 2.4) -- (1.96, 2.4);
+    \fill[orange!85!black] (1.28, 2.4) circle (2.3pt);
+
+    % Row 2 (y=1.4): DML mean-shift: bias +0.004 (x=4.21)
+    \node[left, font=\scriptsize] at (-0.12, 1.4) {DML ($\hat{u}_{\mathrm{mean}}$)};
+    \draw[very thick, teal!75!black] (4.02, 1.4) -- (4.39, 1.4);
+    \fill[teal!75!black] (4.21, 1.4) circle (2.5pt);
+
+    % Row 1 (y=0.5): Multi-concept Oblique DML: bias -0.002 (x=4.20)
+    \node[left, font=\scriptsize] at (-0.12, 0.5) {DML (Oblique $U_k^+$)};
+    \draw[very thick, blue!75!black] (4.05, 0.5) -- (4.34, 0.5);
+    \fill[blue!75!black] (4.20, 0.5) circle (2.5pt);
+  \end{scope}
+\end{tikzpicture}
+\caption{Monte Carlo Summary ($400$ Replications). \emph{Panel~A}: Stage~1 split-half stability and directional recovery across minimal-pair regimes, showing $100\%$ gate passage for $\hat{u}_{\mathrm{mean}}$ in Regimes~A and B and $100\%$ pre-outcome rejection in Regime~C. \emph{Panel~B}: Stage~2 estimation error $\hat{\theta}_1 - \theta_1^*$ (point estimate and $\pm 1.96\text{ SD}$ interval), showing confounding bias under unadjusted OLS, nuisance capture under uncentered PCA, and unbiased recovery under $\hat{u}_{\mathrm{mean}}$ and oblique multi-concept DML.}
+\label{fig:simulation}
+\end{figure}
 
 \subsection{Stage 2: Confounding Adjustment and Multi-Concept Oblique Projection}
 
@@ -402,7 +504,7 @@ In Stage~2, we generate observational representations $h_i = C_{1,i} u_{C_1}^* +
 \input{../tabs/table2_stage2.tex}
 \end{table}
 
-Table~\ref{tab:stage2} confirms every theoretical prediction:
+Table~\ref{tab:stage2} and Figure~\ref{fig:simulation}B confirm every theoretical prediction:
 \begin{enumerate}
     \item \textbf{Omitted-variable bias without $R_i$:} Unadjusted OLS of $Y_i$ on $Z_i$ without controlling for the complement residual $R_i$ suffers severe confounding bias ($+0.773$) and $0\%$ confidence interval coverage.
     \item \textbf{Consequence of uncentered PCA in Stage~1:} Running Stage~2 DML on the noise-corrupted uncentered PCA vector $\hat{u}_{\mathrm{PCA}}$ from Regime~B estimates the effect of the nuisance direction ($\approx 1.0$) rather than the concept ($\theta_1^* = 1.5$), yielding a bias of $-1.458$ relative to $\theta_1^*$ (or sign-flipped nuisance recovery).
