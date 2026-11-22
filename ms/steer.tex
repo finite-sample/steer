@@ -1,0 +1,422 @@
+\documentclass[12pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[sfdefault]{FiraSans}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{setspace}
+\usepackage[square]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\onehalfspacing
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{assumption}{Assumption}
+
+\title{One Concept at a Time:\\
+Subspace-Constrained Causal Inference for High-Dimensional Treatments}
+\author{Gaurav Sood}
+\date{March 16, 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+When treatments are complex objects such as texts, images, or audio, we rarely want the causal effect of the raw object itself; we want the effect of a human-interpretable attribute---such as politeness, threat, or formality---holding everything else fixed. Surface edits inevitably alter multiple correlated attributes at once, and latent factors discovered from observational corpora routinely blend target concepts with background confounders. We propose a two-stage framework that separates concept geometry from causal estimation. In Stage~1, we construct contrastive minimal pairs intended to vary a target concept $C$ and extract a low-dimensional concept subspace $U_k \in \mathbb{R}^{d \times k}$ in a frozen pretrained representation $h(T) \in \mathbb{R}^d$. We show that uncentered second-moment singular value decomposition conflates the mean concept shift with zero-mean nuisance edit noise, and we separate the normalized mean shift (for $k=1$) from centered principal components (for $k>1$ context heterogeneity). Stage~1 enforces falsifiable pre-outcome diagnostics---variance concentration, split-half principal-angle stability, and out-of-domain transfer---that reject ill-posed concepts before outcomes are analyzed. In Stage~2, we decompose representations into concept coordinates and their orthogonal complement---using oblique pseudoinverse projections when multiple concepts are non-orthogonal---to estimate causal effects via activation steering (with round-trip decoding diagnostics) or double/debiased machine learning (DML). When minimal pairs come from an external sample, DML inference for the subspace-conditional estimand is exact conditional on $\hat{U}_k$, while recovery of a population subspace parameter follows a Davis--Kahan eigengap rate.
+\end{abstract}
+
+\section{Introduction}
+
+Suppose a political scientist wants to measure the causal effect of politeness in constituent emails on legislative responsiveness, or an economist wants to estimate how assertive language in a job application affects callback rates. The treatment that subjects actually encounter is a full text $T$. Yet the scientific hypothesis is not about a particular string of words; it is about an abstract concept $C$ carried by the text.
+
+This creates a fundamental identification problem. If we edit a text to make it more polite---replacing ``Send me the form'' with ``Could you please send me the form when convenient?''---we do not only change politeness. We also change length, reading grade level, deference, and perceived socioeconomic status. As \citet{fong2016discovery,fong2023causal} and \citet{egami2022make} emphasize, high-dimensional treatments like text bundle many latent attributes together. Without formal structure linking the surface object $T$ to the target concept $C$ and the remaining bundled attributes $W$, the ceteris paribus counterfactual ``change $C$ while holding $W$ fixed'' is not even well-defined.
+
+Existing work in causal natural language processing generally takes one of two paths. The first discovers latent treatments directly from the observational corpus using topic models or representation clustering \citep{fong2016discovery,pryzant2021causal,feder2022causal}. While useful for exploration, unsupervised or outcome-supervised latent factors routinely entangle the concept of interest with correlated confounders in the corpus. The second path uses supervised classifiers or probing directions trained on labeled data to proxy for $C$ \citep{veitch2020adapting,keith2020text,elazar2021amnesic}. However, a decision boundary optimized to predict labels in a training domain readily absorbs spurious correlates \citep{belinkov2022probing,ravfogel2020null}.
+
+Meanwhile, mechanistic interpretability and representation engineering have demonstrated that pretrained transformer models often encode high-level semantic and stylistic concepts as approximately linear directions or low-dimensional subspaces within intermediate hidden representations $h(T) \in \mathbb{R}^d$ \citep{alain2016understanding,meng2022locating,turner2023activation,zou2023representation,park2023linear,li2023inference}. Adding a multiple of a ``steering vector'' $u_C \in \mathbb{R}^d$ during a forward pass can systematically shift generated text along concept $C$. Yet the steering literature uses linear representations primarily as an engineering heuristic for model control, without formal causal estimands, confounding adjustments, or criteria for when a concept fails to admit a linear subspace.
+
+This paper bridges representation engineering and semiparametric causal inference. Rather than assuming that every concept is a clean linear direction, we treat the existence of a concept subspace as a falsifiable first-stage hypothesis tested on contrastive minimal pairs before touching outcome data.
+
+Our framework proceeds in two stages and makes six methodological contributions:
+\begin{enumerate}
+    \item \textbf{Separating mean concept shift from nuisance edit covariance (Section~\ref{sec:stage1}).} When minimal pairs $(T_j^-, T_j^+)$ are constructed by humans or large language models, individual edits inevitably contain incidental semantic jitter. We show that taking the top eigenvector of the uncentered second-moment matrix $S = \frac{1}{m}DD^\top = \bar{\Delta h}\bar{\Delta h}^\top + \widehat{\mathrm{Cov}}(\Delta h)$ conflates the systematic concept shift $\bar{\Delta h}$ with high-variance zero-mean nuisance edit directions. For a one-dimensional directional concept ($k=1$), the normalized mean shift $\hat{u}_{\mathrm{mean}} = \bar{\Delta h}/\|\bar{\Delta h}\|_2$ averages out zero-mean nuisance edits at rate $O_P(m^{-1/2})$, whereas centered principal component analysis (PCA) on $\widehat{\mathrm{Cov}}(\Delta h)$ diagnoses whether the concept requires a multi-dimensional subspace ($k > 1$) across heterogeneous contexts.
+    \item \textbf{Stage~1 as a falsifiable diagnostic gate (Section~\ref{sec:diagnostics}).} We formalize four pre-outcome diagnostics---signal concentration, centered residual variance, split-half principal-angle stability, and cross-domain transfer---that allow the researcher to reject the subspace model when a concept is diffuse, context-bound, or nonlinearly curved.
+    \item \textbf{Basis invariance and oblique multi-concept decompositions (Sections~\ref{sec:decomposition} and \ref{sec:multiconcept}).} When $k > 1$ for a single concept, individual coordinates of the causal slope vector $\theta_0 \in \mathbb{R}^k$ rotate under alternative orthonormal bases for $\mathcal{S}_C$, whereas the directional effect $\gamma^\top \theta_0$ and the representation functional $(U_k \theta_0)^\top h$ are basis-invariant. Conversely, when $k$ distinct concepts $u_{C_1}, \dots, u_{C_k}$ are estimated from separate minimal-pair sets, their directions are generally non-orthogonal ($U_k^\top U_k \neq I_k$). We prove that applying the orthogonal residual formula $(I_d - U_k U_k^\top)h_i$ leaves concept signal in the nuisance residual and causes double machine learning (DML) to fail; valid decomposition requires the oblique pseudoinverse projection $Z_i = (U_k^\top U_k)^{-1}U_k^\top h_i$ and orthogonal complement projector $R_i = (I_d - U_k (U_k^\top U_k)^{-1}U_k^\top)h_i$.
+    \item \textbf{Representation sufficiency and round-trip decoding diagnostics (Sections~\ref{sec:estimands} and \ref{sec:designA}).} Because human respondents observe rendered surface texts $T$ rather than internal neural activations $h(T)$, representation-level steering interventions require decoding perturbed hidden states back to text. We formalize representation sufficiency and a round-trip decoding consistency condition, accompanied by an empirical round-trip leakage ratio.
+    \item \textbf{Observational covariance geometry and Stage-2 DML diagnostics (Section~\ref{sec:designB}).} In anisotropic transformer representations ($\Sigma_h = \mathrm{Cov}(h(T)) \neq \sigma^2 I_d$), Euclidean orthogonality $U_k^\top R_i = 0$ does not imply statistical independence between the concept coordinates $Z_i$ and background residual $R_i$. We introduce a Stage-2 overlap diagnostic---the first-stage partial $R^2(Z \mid R)$---alongside reduced-rank orthonormal parameterization of $R_i \in \mathbb{R}^d$ (which has rank $d-k$) for cross-fitted DML \citep{robinson1988root,chernozhukov2018double}.
+    \item \textbf{Split-sample validity and Davis--Kahan subspace perturbation bounds (Section~\ref{sec:inference}).} When minimal pairs are drawn from an external corpus independent of the observational study, cross-fitted DML confidence intervals for the subspace-conditional causal effect $\theta_0(\hat{U}_k)$ are asymptotically exact conditional on $\hat{U}_k$. When the target is a latent population subspace parameter $\theta_0(U_k^*)$, estimation error decays at the Davis--Kahan rate $O_P(m^{-1/2}/\delta_k)$ governed by the eigengap $\delta_k$ \citep{davis1970rotation}.
+\end{enumerate}
+
+\section{Motivating Example: What Changes When We ``Change Politeness''?}
+
+Consider a field or survey experiment testing whether polite requests receive more helpful replies. A researcher starts with a baseline email $T^-$:
+\begin{quote}
+\small
+``Send me the budget spreadsheet by 5 PM today. I need the updated numbers for the committee report.''
+\end{quote}
+To create a polite version $T^+$, the researcher (or an LLM prompt) rewrites the message:
+\begin{quote}
+\small
+``Would you mind sending over the budget spreadsheet by 5 PM today if your schedule permits? I would really appreciate having the updated numbers for the committee report.''
+\end{quote}
+If $T^+$ increases response rates relative to $T^-$, what caused the increase? The rewrite increased lexical politeness markers (``Would you mind'', ``appreciate''), but it also softened deadline urgency (``if your schedule permits''), shifted sentence length from 17 to 27 words, and altered perceived status hierarchy.
+
+A single pair $(T^-, T^+)$ hopelessly confounds politeness with urgency and length. However, suppose we generate $m = 100$ minimal pairs $(T_j^-, T_j^+)$ across diverse request domains---scheduling, data sharing, customer refunds, academic peer review---where every pair is instructed to increase politeness while preserving deadline urgency and content. In any single pair $j$, the edit will still introduce idiosyncratic jitter $\varepsilon_j$: pair~1 might accidentally add hedging, pair~2 might become slightly longer, and pair~3 might use more formal vocabulary. So long as these incidental edits are not systematically aligned across all $m$ contexts, their representation differences $\Delta h_j = h(T_j^+) - h(T_j^-)$ will share a common directional shift corresponding to politeness while the incidental jitter varies across orthogonal directions. Stage~1 formalizes how to extract that shared subspace---and how to tell when the edits fail to isolate one.
+
+\section{Setup and Notation}
+
+Let $\mathcal{T}$ denote the space of surface objects (texts, images, or audio clips). Each unit $i \in \{1, \dots, n\}$ in an empirical study is exposed to an object $T_i \in \mathcal{T}$ and exhibits a scalar outcome $Y_i \in \mathbb{R}$.
+
+\begin{itemize}
+    \item \textbf{Conceptual decomposition.} Conceptually, we think of $T$ as carrying a target attribute $C$ (the concept of interest, such as politeness or threat) and a high-dimensional bundle of all other attributes $W$ (topic, factual claims, length, formatting, reading level). The scientific question asks how changing $C$ affects $Y$ when $W$ is held fixed.
+    \item \textbf{Fixed representation map.} Let $h : \mathcal{T} \to \mathbb{R}^d$ be a deterministic representation map extracted from a fixed layer and token aggregation rule (e.g., last-token or mean-pooled residual stream activation at layer $\ell$) of a pretrained foundation model. Crucially, the parameters of $h(\cdot)$ are frozen prior to the study and never tuned on outcome data $Y$.
+    \item \textbf{Contrastive minimal-pair corpus.} Independent of the outcome sample $\mathcal{D}_{\mathrm{obs}} = \{(T_i, Y_i)\}_{i=1}^n$, the researcher constructs or collects an external set of $m$ contrastive minimal pairs $\mathcal{D}_{\mathrm{pairs}} = \{(T_j^-, T_j^+)\}_{j=1}^m$, where $T_j^+$ is an edit of $T_j^-$ designed to increase concept $C$ by a normalized step while holding non-target attributes $W$ constant.
+\end{itemize}
+
+For each minimal pair $j \in \{1, \dots, m\}$, define the representation difference vector:
+\begin{equation}\label{eq:delta_h}
+\Delta h_j = h(T_j^+) - h(T_j^-) \in \mathbb{R}^d,
+\end{equation}
+and stack these differences column-wise into the difference matrix
+\begin{equation}\label{eq:D_matrix}
+D = \begin{bmatrix} \Delta h_1 & \Delta h_2 & \cdots & \Delta h_m \end{bmatrix} \in \mathbb{R}^{d \times m}.
+\end{equation}
+
+\section{Stage 1: Defining and Auditing the Concept Subspace}\label{sec:stage1}
+
+\subsection{Contrastive Minimal Pairs and the Linear Subspace Model}
+
+Why do minimal pairs help isolate a concept? Under the linear representation hypothesis \citep{park2023linear,zou2023representation}, a concept $C$ corresponds to a $k$-dimensional linear subspace $\mathcal{S}_C \subset \mathbb{R}^d$ spanned by an orthonormal basis matrix $U_k^* \in \mathbb{R}^{d \times k}$ with $(U_k^*)^\top U_k^* = I_k$, where $k \ll d$ (and in the simplest directional case, $k = 1$).
+
+Specifically, suppose each contrastive edit $j \in \{1, \dots, m\}$ induces a representation shift of the form
+\begin{equation}\label{eq:edit_model}
+\Delta h_j = U_k^* \alpha_j + \varepsilon_j, \qquad \mathbb{E}[\varepsilon_j] = 0, \qquad \mathrm{Cov}(\varepsilon_j) = \Sigma_\varepsilon,
+\end{equation}
+where $\alpha_j \in \mathbb{R}^k$ is the concept shift magnitude on pair $j$ (with nonzero mean $\mu_\alpha = \mathbb{E}[\alpha_j] \neq 0$ because every pair moves from $C^-$ to $C^+$ in the same polarity) and $\varepsilon_j \in \mathbb{R}^d$ captures incidental edit noise (lexical variation, syntax changes, and context-specific artefacts that vary zero-mean across pairs).
+
+\subsection{Separating Mean Concept Shift from Nuisance Edit Covariance}\label{sec:mean_vs_pca}
+
+A standard practice in representation engineering is to compute the uncentered second-moment matrix of differences,
+\begin{equation}\label{eq:S_matrix}
+S = \frac{1}{m} D D^\top = \frac{1}{m} \sum_{j=1}^m \Delta h_j \Delta h_j^\top \in \mathbb{R}^{d \times d},
+\end{equation}
+and take its top $k$ eigenvectors as the concept subspace \citep{zou2023representation}. However, expanding $S$ around the sample mean difference $\bar{\Delta h} = \frac{1}{m}\sum_{j=1}^m \Delta h_j$ reveals a critical identification trap:
+\begin{equation}\label{eq:S_decomposition}
+S = \bar{\Delta h}\,\bar{\Delta h}^\top + \widehat{\mathrm{Cov}}(\Delta h), \qquad \widehat{\mathrm{Cov}}(\Delta h) = \frac{1}{m} \sum_{j=1}^m (\Delta h_j - \bar{\Delta h})(\Delta h_j - \bar{\Delta h})^\top.
+\end{equation}
+Taking expectations under the contrastive edit model~\eqref{eq:edit_model} yields
+\begin{equation}\label{eq:E_S}
+\mathbb{E}[S] = U_k^* \left(\mu_\alpha \mu_\alpha^\top + \Sigma_\alpha\right) (U_k^*)^\top + \Sigma_\varepsilon + O(m^{-1}),
+\end{equation}
+where $\Sigma_\alpha = \mathrm{Cov}(\alpha_j)$.
+
+Equation~\eqref{eq:E_S} exposes why uncentered PCA on $S$ can fail catastrophically when $k = 1$. In Section~4.1, the core intuition of minimal pairs is that ``incidental changes average out across pairs.'' Averaging out zero-mean nuisance noise $\varepsilon_j$ is a property of the \emph{first moment} $\bar{\Delta h}$, whose expectation is $\mathbb{E}[\bar{\Delta h}] = U_k^* \mu_\alpha$ regardless of how large $\Sigma_\varepsilon$ is! By contrast, the second-moment matrix $S$ sums the squared outer products of $\varepsilon_j$. If incidental edits exhibit high zero-mean variance along some nuisance direction $u_{\mathrm{nuis}} \perp U_k^*$ (for instance, because sentence length or syntactic structure fluctuates widely across rewrites, so $u_{\mathrm{nuis}}^\top \Sigma_\varepsilon u_{\mathrm{nuis}} > \|\mu_\alpha\|_2^2$), then the top eigenvector of $S$ will lock onto the nuisance direction $u_{\mathrm{nuis}}$ rather than the concept direction $u_C^*$.
+
+This distinction dictates two distinct estimators depending on the subspace dimension $k$:
+\begin{enumerate}
+    \item \textbf{One-dimensional directional concept ($k = 1$): Normalized Mean-Shift Estimator.} When a concept is hypothesized to act along a single consistent direction $u_C^* \in \mathbb{R}^d$ ($\alpha_j \in \mathbb{R}$ with $\mu_\alpha > 0$), the consistent estimator that averages out zero-mean edit noise is the normalized sample mean difference:
+    \begin{equation}\label{eq:u_mean}
+    \hat{u}_{\mathrm{mean}} = \frac{\bar{\Delta h}}{\|\bar{\Delta h}\|_2}, \qquad \bar{\Delta h} = \frac{1}{m}\sum_{j=1}^m \Delta h_j.
+    \end{equation}
+    By the law of large numbers, $\bar{\Delta h} = \mu_\alpha u_C^* + \bar{\varepsilon} \xrightarrow{p} \mu_\alpha u_C^*$ as $m \to \infty$ even when the nuisance covariance $\Sigma_\varepsilon$ has eigenvalues larger than $\mu_\alpha^2$.
+    \item \textbf{Multi-dimensional single concept ($k > 1$): Mean Direction Plus Centered Covariance PCA.} When a concept exhibits context-dependent sub-dimensions (for instance, ``politeness'' manifests along one direction in formal business requests and a second orthogonal direction in casual peer messages, so $\mathrm{rank}(\Sigma_\alpha) = k - 1$ or $k$), the mean shift $\hat{u}_1 = \hat{u}_{\mathrm{mean}}$ captures the primary polarity direction, while the remaining $k-1$ basis directions $\hat{U}_{2:k} \in \mathbb{R}^{d \times (k-1)}$ are estimated from the top $k-1$ eigenvectors of the centered sample covariance projected orthogonally to $\hat{u}_1$:
+    \begin{equation}\label{eq:centered_pca}
+    \widehat{\mathrm{Cov}}_\perp(\Delta h) = (I_d - \hat{u}_1 \hat{u}_1^\top)\,\widehat{\mathrm{Cov}}(\Delta h)\,(I_d - \hat{u}_1 \hat{u}_1^\top).
+    \end{equation}
+    Combining $\hat{U}_k = [\hat{u}_1, \hat{U}_{2:k}] \in \mathbb{R}^{d \times k}$ guarantees an orthonormal basis ($\hat{U}_k^\top \hat{U}_k = I_k$) whose first coordinate tracks the average concept polarity and whose remaining coordinates capture structured context heterogeneity.
+\end{enumerate}
+
+\subsection{Orthogonal Decomposition, Basis Invariance, and Anisotropy}\label{sec:decomposition}
+
+Given an estimated orthonormal basis $U_k \in \mathbb{R}^{d \times k}$ with $U_k^\top U_k = I_k$ for a single concept subspace $\mathcal{S}_C = \mathrm{span}(U_k)$, let $P_{U_k} = U_k U_k^\top \in \mathbb{R}^{d \times d}$ denote the Euclidean orthogonal projection matrix onto $\mathcal{S}_C$. We decompose any representation vector $h_i = h(T_i) \in \mathbb{R}^d$ into three objects:
+\begin{align}
+Z_i &= U_k^\top h_i \in \mathbb{R}^k \qquad &&\text{(low-dimensional concept coordinates)}, \label{eq:Z_i} \\
+h_{\parallel,i} &= P_{U_k} h_i = U_k Z_i \in \mathbb{R}^d \qquad &&\text{(in-subspace representation component)}, \label{eq:h_parallel} \\
+R_i &= (I_d - P_{U_k}) h_i = h_i - U_k Z_i \in \mathbb{R}^d \qquad &&\text{(orthogonal complement residual)}. \label{eq:R_i}
+\end{align}
+By construction, $h_i = U_k Z_i + R_i$ and $U_k^\top R_i = 0 \in \mathbb{R}^k$. Two geometric subtleties must be kept explicit:
+
+\paragraph{1. Rotational invariance for $k > 1$.} When $k = 1$, $U_1 = u_C$ is unique up to sign, and the sign is fixed by the contrastive polarity $u_C^\top \bar{\Delta h} > 0$. When $k > 1$, any orthonormal rotation $\tilde{U}_k = U_k O$ (with $O \in \mathbb{R}^{k \times k}$, $O^\top O = I_k$) spans the exact same subspace $\mathcal{S}_C$ and yields the exact same projection matrix $P_{\tilde{U}_k} = \tilde{U}_k \tilde{U}_k^\top = U_k O O^\top U_k^\top = P_{U_k}$ and residual $R_i$. However, the coordinate vector transforms as $\tilde{Z}_i = O^\top Z_i$, and in a linear regression of $Y_i$ on $Z_i$, the parameter vector transforms as $\tilde{\theta}_0 = O^\top \theta_0$. Consequently, when $k > 1$, \emph{individual coordinates $\theta_{0,r}$ are basis-dependent}; only the representation-space linear functional $\beta_{\mathcal{S}_C} = U_k \theta_0 \in \mathcal{S}_C$, the directional causal effect $\gamma^\top \theta_0$ for a specified perturbation $\delta h = U_k \gamma$, and the subspace norm $\|\theta_0\|_2 = \|U_k \theta_0\|_2$ are invariant to the choice of basis for $\mathcal{S}_C$.
+
+\paragraph{2. Euclidean orthogonality versus statistical orthogonality under $\Sigma_h$.} The projection $R_i = (I_d - U_k U_k^\top)h_i$ enforces \emph{Euclidean} orthogonality in representation space: $U_k^\top R_i = 0$ for every unit $i$. It does \emph{not} imply that the random variables $Z_i$ and $R_i$ are statistically uncorrelated in the observational population! If $h_i$ has population covariance $\Sigma_h = \mathrm{Cov}(h(T_i))$ in the observational corpus, then
+\begin{equation}\label{eq:cov_Z_R}
+\mathrm{Cov}(Z_i, R_i) = U_k^\top \Sigma_h (I_d - U_k U_k^\top).
+\end{equation}
+This covariance vanishes if and only if $\mathcal{S}_C$ is an invariant eigenspace of $\Sigma_h$ (for example, when $\Sigma_h = \sigma^2 I_d$). Because pretrained transformer representations are strongly anisotropic, $\mathrm{Cov}(Z_i, R_i) \neq 0$ in general: polite texts in the wild also tend to have characteristic topics or lengths encoded in $R_i$. That is precisely why Stage~2 cannot simply regress $Y_i$ on $Z_i$ alone; it must condition on $R_i$ (or perform a physical intervention on $Z_i$ while holding $R_i$ fixed). Equivalently, one could define projections in the $\Sigma_h$-whitened inner product $\langle a, b \rangle_{\Sigma_h^{-1}} = a^\top \Sigma_h^{-1} b$, which makes the whitened residual statistically uncorrelated with $Z_i$ by construction, though the linear partial regression adjustment for $R_i$ in Stage~2 automatically achieves this covariance orthogonalization.
+
+\section{Stage 1 as a Falsifiable Diagnostic Gate}\label{sec:diagnostics}
+
+A central methodological discipline of our framework is that the linear subspace representation is a testable hypothesis, not an maintained axiom. Because Stage~1 uses only the minimal pairs $\mathcal{D}_{\mathrm{pairs}}$ and the frozen representation map $h(\cdot)$---without ever viewing outcome data $Y$---the researcher can audit and reject ill-posed concepts without invalidating subsequent causal inference (no $p$-hacking on outcomes). We require four pre-outcome diagnostics:
+
+\subsection{Signal Concentration and Mean-vs-PCA Alignment}
+
+Let $\lambda_1 \ge \lambda_2 \ge \dots \ge \lambda_d \ge 0$ denote the eigenvalues of the uncentered second-moment matrix $S = \frac{1}{m}DD^\top$, and let $\tilde{\lambda}_1 \ge \dots \ge \tilde{\lambda}_d \ge 0$ denote the eigenvalues of the centered sample covariance $\widehat{\mathrm{Cov}}(\Delta h)$. The uncentered cumulative variance ratio is
+\begin{equation}\label{eq:R2_k}
+R_k^2 = \frac{\sum_{r=1}^k \lambda_r}{\sum_{r=1}^d \lambda_r} = \frac{\sum_{r=1}^k \lambda_r}{\frac{1}{m}\sum_{j=1}^m \|\Delta h_j\|_2^2}.
+\end{equation}
+In addition, for $k = 1$, we check the cosine alignment between the top uncentered eigenvector $\hat{u}_{\mathrm{PCA}}$ and the normalized mean shift $\hat{u}_{\mathrm{mean}}$:
+\begin{equation}\label{eq:mean_pca_align}
+\cos\angle(\hat{u}_{\mathrm{PCA}}, \hat{u}_{\mathrm{mean}}) = |\hat{u}_{\mathrm{PCA}}^\top \hat{u}_{\mathrm{mean}}|,
+\end{equation}
+along with the mean-to-total energy ratio $\|\bar{\Delta h}\|_2^2 / \mathrm{tr}(S)$. If $R_1^2$ is high (say, $R_1^2 > 0.50$) but $|\hat{u}_{\mathrm{PCA}}^\top \hat{u}_{\mathrm{mean}}|$ is small, the minimal pairs suffer from a dominant zero-mean nuisance edit direction (Regime~B in Section~\ref{sec:simulations}), and $\hat{u}_{\mathrm{mean}}$ must be used instead of $\hat{u}_{\mathrm{PCA}}$. If both $\|\bar{\Delta h}\|_2^2 / \mathrm{tr}(S)$ and $R_k^2$ for small $k$ are near the random-matrix baseline $k/m$, the edits do not concentrate in any low-dimensional subspace.
+
+\subsection{Split-Half Subspace Stability}
+
+If a $k$-dimensional subspace genuinely represents concept $C$, then two disjoint subsets of minimal pairs should recover virtually the same subspace. We randomly partition the $m$ pairs into two halves $D^{(1)}, D^{(2)} \in \mathbb{R}^{d \times (m/2)}$ repeatedly across $B$ splits, estimate orthonormal bases $\hat{U}_k^{(1)}$ and $\hat{U}_k^{(2)}$ on each half, and compute the singular values $\sigma_1 \ge \dots \ge \sigma_k$ of $(\hat{U}_k^{(1)})^\top \hat{U}_k^{(2)}$. The cosines of the principal angles between the two subspaces are $\cos\theta_r = \sigma_r$, and the chordal distance is $\|P_{\hat{U}_k^{(1)}} - P_{\hat{U}_k^{(2)}}\|_F = \sqrt{2\sum_{r=1}^k (1 - \sigma_r^2)}$. For $k = 1$, this simplifies to the split-half cosine similarity $|\hat{u}^{(1)\top} \hat{u}^{(2)}|$. High split-half stability (e.g., $\cos\theta_k > 0.85$) confirms that the subspace is well-determined at sample size $m$.
+
+\subsection{Out-of-Domain Transfer Across Context Families}
+
+Even if a direction is stable within a homogeneous template set, it might reflect template artifacts rather than the concept $C$. Suppose the minimal pairs are stratified into $G \ge 2$ distinct context domains (e.g., constituent emails, corporate memos, and online forum posts). Let $\hat{U}_k^{(g)}$ be the subspace estimated using only domain $g$. The out-of-domain transfer diagnostic evaluates the principal-angle cosines between $\hat{U}_k^{(g)}$ and $\hat{U}_k^{(g')}$ for $g \neq g'$, as well as the fraction of variance in domain $g'$ captured by $\hat{U}_k^{(g)}$. Poor cross-domain alignment reveals that the concept is domain-specific rather than globally linear.
+
+\subsection{Known-Group Validity and Off-Target Leakage}
+
+Finally, if external texts with known concept levels are available, projecting their representations onto $\hat{U}_k$ should monotonically order the known groups. Equally important, if the researcher has estimated directions $u_{W_\ell}$ for known off-target attributes $W_\ell$ (such as sentiment, toxicity, or formality), the inner products $|u_{W_\ell}^\top \hat{u}_C|$ measure geometric entanglement between the target concept and off-target attributes in representation space.
+
+\paragraph{The Rejection Rule.} If the minimal pairs exhibit low signal concentration, poor split-half stability ($\cos\theta_k < 0.70$), or failure to transfer across context domains, the researcher \emph{stops at Stage~1} and concludes that concept $C$ is not well-represented as a low-dimensional linear subspace in $h(\cdot)$. Attempting Stage~2 causal estimation on an unstable or dispersed subspace estimates noise.
+
+\section{Causal Setup and Estimands}\label{sec:estimands}
+
+When Stage~1 passes its diagnostic gates, we fix the estimated $k$-dimensional basis $U_k \in \mathbb{R}^{d \times k}$ (writing $U_k$ for the locked Stage~1 basis and deferring Stage~1 sampling uncertainty to Section~\ref{sec:inference}). To define causal effects rigorously, we distinguish between surface-text potential outcomes and representation-level potential outcomes.
+
+\subsection{Potential Outcomes and Representation Sufficiency}
+
+In an experiment or observational study with human evaluators, respondents react to the rendered object $T \in \mathcal{T}$, generating potential outcomes $Y_i(T)$ for $T \in \mathcal{T}$. When the outcome is produced by a downstream head of the neural network itself, or when $h(T)$ captures all outcome-relevant information in $T$, potential outcomes can be indexed directly by the representation $h = U_k z + r \in \mathbb{R}^d$.
+
+\begin{assumption}[Representation Sufficiency for Potential Outcomes]\label{ass:rep_sufficiency}
+For any two surface objects $T, T' \in \mathcal{T}$, if $h(T) = h(T')$, then $Y_i(T) = Y_i(T')$ almost surely. Under this condition, there exists a well-defined representation-level potential outcome function $Y_i(z, r)$ for $z \in \mathbb{R}^k$ and $r \in \mathcal{S}_C^\perp = \{v \in \mathbb{R}^d : U_k^\top v = 0\}$ such that $Y_i(T) = Y_i(U_k^\top h(T), (I_d - P_{U_k})h(T))$.
+\end{assumption}
+
+Why is Assumption~\ref{ass:rep_sufficiency} load-bearing? If two texts map to the exact same representation $h(T) = h(T')$ at layer $\ell$ (for example, because pooling discards a subtle punctuation cue that humans notice), then holding $R_i$ fixed in representation space does not hold all human-visible background attributes fixed. Choosing a rich late-intermediate layer representation where text reconstruction is nearly lossless \citep{morris2023text} makes Assumption~\ref{ass:rep_sufficiency} plausible.
+
+\subsection{Causal Estimands}
+
+Under Assumption~\ref{ass:rep_sufficiency}, we define three causal estimands of increasing structure:
+
+\begin{enumerate}
+    \item \textbf{Local Steering Causal Effect (LCE).} For a unit with baseline representation $h_i = U_k Z_i + R_i$ and a perturbation vector $\gamma \in \mathbb{R}^k$ along the concept subspace, the individual local steering effect is
+    \begin{equation}\label{eq:LCE_i}
+    \tau_i(\gamma) = Y_i(Z_i + \gamma, R_i) - Y_i(Z_i, R_i),
+    \end{equation}
+    and the average local steering causal effect is $\tau(\gamma) = \mathbb{E}[Y_i(Z_i + \gamma, R_i) - Y_i(Z_i, R_i)]$.
+    \item \textbf{Average Dose--Response Curve.} Setting everyone's concept coordinate to a fixed level $z \in \mathbb{R}^k$ while preserving their observed background residual $R_i$ yields the marginal structural dose--response function
+    \begin{equation}\label{eq:mu_z}
+    \mu(z) = \mathbb{E}\big[Y_i(z, R_i)\big].
+    \end{equation}
+    \item \textbf{Partially Linear Concept Slope.} In the partially linear representation model
+    \begin{equation}\label{eq:partially_linear}
+    Y_i(z, r) = \theta_0^\top z + g_0(r) + \xi_i, \qquad \mathbb{E}[\xi_i \mid Z_i, R_i] = 0,
+    \end{equation}
+    where $g_0 : \mathcal{S}_C^\perp \to \mathbb{R}$ is an unknown, potentially complex nuisance function of the $(d-k)$-dimensional complement residual $R_i$, the parameter $\theta_0 \in \mathbb{R}^k$ is the marginal causal effect per unit shift in the concept coordinates $Z_i$, holding $R_i$ fixed: $\tau(\gamma) = \gamma^\top \theta_0$.
+\end{enumerate}
+
+\section{Stage 2, Design A: Interventional Estimation via Steering}\label{sec:designA}
+
+When the researcher can intervene directly on the treatment before measuring $Y_i$, causal identification does not require unconfoundedness across observational units.
+
+\subsection{Experimental Steering Protocol and Round-Trip Decoding Consistency}
+
+Given a baseline object $T_i$ with representation $h_i = h(T_i)$ and a randomized steering dose $\Gamma_i \in \mathbb{R}^k$ (drawn independently of baseline characteristics, $\Gamma_i \perp (T_i, Z_i, R_i)$), the target steered representation is
+\begin{equation}\label{eq:h_steered}
+h_i^{\mathrm{target}}(\Gamma_i) = h_i + U_k \Gamma_i = U_k(Z_i + \Gamma_i) + R_i.
+\end{equation}
+There are two distinct experimental settings:
+\begin{itemize}
+    \item \textbf{Internal model outcomes (activation addition).} If the outcome $Y_i$ is a downstream behavior of the language model itself (e.g., refusal probability, toxicity score, or log-odds of a target token), we intervene directly on the forward pass at layer $\ell$ by replacing $h_i$ with $h_i + U_k \Gamma_i$ \citep{turner2023activation,li2023inference}. Here, the representation intervention is exact by construction: $Z_i$ shifts by $\Gamma_i$ and $R_i$ changes by zero.
+    \item \textbf{Human-subject experiments (decode-and-re-encode).} If human subjects evaluate the treatment, we cannot show a human a vector in $\mathbb{R}^d$; we must decode or generate a surface text $T_i^\star(\Gamma_i) = \mathrm{Decode}(h_i + U_k \Gamma_i) \in \mathcal{T}$ and present $T_i^\star(\Gamma_i)$ to subject $i$.
+\end{itemize}
+
+In human-subject experiments, decoding a perturbed vector back to discrete tokens is not guaranteed to preserve exact geometric orthogonality when re-encoded through $h(\cdot)$. Let $h_i^\star(\Gamma_i) = h(T_i^\star(\Gamma_i))$ denote the re-encoded representation of the generated text. For the rendered text to implement a clean subspace intervention, it must satisfy approximate round-trip decoding consistency:
+\begin{equation}\label{eq:round_trip}
+h\big(\mathrm{Decode}(h_i + U_k \Gamma_i)\big) - h(T_i) \approx U_k \Gamma_i.
+\end{equation}
+Crucially, Equation~\eqref{eq:round_trip} can be verified directly on every experimental stimulus prior to fielding the human experiment using two empirical diagnostics:
+\begin{align}
+\text{On-Target Dose Realization:} \qquad &\widehat{\Delta Z}_i(\Gamma_i) = U_k^\top \big(h(T_i^\star(\Gamma_i)) - h(T_i)\big) \approx \Gamma_i, \label{eq:dose_realization} \\
+\text{Off-Subspace Leakage Ratio:} \qquad &\mathcal{L}_i(\Gamma_i) = \frac{\|(I_d - P_{U_k})\big(h(T_i^\star(\Gamma_i)) - h(T_i)\big)\|_2}{\|h(T_i^\star(\Gamma_i)) - h(T_i)\|_2}. \label{eq:leakage_ratio}
+\end{align}
+If the off-subspace leakage ratio $\mathcal{L}_i(\Gamma_i)$ is large, the decoder is altering non-target attributes $R_i$ as a byproduct of changing $Z_i$. In that case, the randomized dose $\Gamma_i$ serves as an \emph{instrumental variable} for the realized shift $\widehat{\Delta Z}_i$, or the researcher must condition on the realized off-subspace drift $\widehat{\Delta R}_i = (I_d - P_{U_k})(h(T_i^\star(\Gamma_i)) - h(T_i))$ in the outcome regression.
+
+\subsection{Why Steering Differs from Ad Hoc Prompt Rewriting}
+
+When an experimenter simply asks an LLM to ``rewrite each text to be more polite'' without projection Diagnostics~\eqref{eq:dose_realization}--\eqref{eq:leakage_ratio}, the magnitude of the concept shift varies wildly across texts and off-subspace attributes drift unchecked. Subspace steering provides an explicit coordinate system to calibrate the dose $\Gamma_i$ and audit off-subspace leakage $\mathcal{L}_i(\Gamma_i)$ before collecting a single outcome observation.
+
+\section{Stage 2, Design B: Observational Estimation via Subspace Projection and DML}\label{sec:designB}
+
+In many applications, the researcher cannot intervene on texts and must estimate the causal effect of concept $C$ from an observational corpus $\mathcal{D}_{\mathrm{obs}} = \{(T_i, Y_i)\}_{i=1}^n$.
+
+\subsection{Identification Assumptions and the Overlap Diagnostic}
+
+In observational data, the concept coordinates $Z_i = U_k^\top h_i$ are naturally correlated with the orthogonal complement $R_i = (I_d - P_{U_k})h_i$ because of representation anisotropy (Equation~\ref{eq:cov_Z_R}). Identification of the partially linear model~\eqref{eq:partially_linear} rests on two standard conditions:
+
+\begin{assumption}[Conditional Unconfoundedness Given $R_i$]\label{ass:unconfoundedness}
+In the partially linear representation model $Y_i = \theta_0^\top Z_i + g_0(R_i) + \xi_i$, the unobserved outcome disturbance satisfies $\mathbb{E}[\xi_i \mid Z_i, R_i] = 0$.
+\end{assumption}
+
+\begin{assumption}[Subspace Overlap / Non-Collinearity]\label{ass:overlap}
+Let $m_0(R_i) = \mathbb{E}[Z_i \mid R_i]$ denote the conditional expectation of the concept coordinates given the complement residual, and let $V_i = Z_i - m_0(R_i)$ be the first-stage residual. The conditional covariance matrix $\Sigma_V = \mathbb{E}[V_i V_i^\top]$ is strictly positive definite ($\lambda_{\min}(\Sigma_V) > 0$).
+\end{assumption}
+
+Assumption~\ref{ass:unconfoundedness} fails if an unobserved external variable (such as author prestige not encoded in the text $T_i$, or a linguistic confounder lost by the representation map $h$) simultaneously drives $Z_i$ and $Y_i$. Assumption~\ref{ass:overlap} requires that $Z_i$ is not deterministically reconstructible from $R_i$ in the observational corpus.
+
+Because $R_i$ is $(d-k)$-dimensional, near-collinearity between $Z_i$ and $R_i$ is a real practical risk. We therefore require reporting a **Stage-2 Overlap Diagnostic** alongside every observational estimate: the cross-fitted first-stage partial $R^2$ for each concept coordinate $r \in \{1, \dots, k\}$,
+\begin{equation}\label{eq:first_stage_R2}
+R^2(Z_r \mid R) = 1 - \frac{\widehat{\mathrm{Var}}(\tilde{Z}_{i,r})}{\widehat{\mathrm{Var}}(Z_{i,r})}, \qquad \tilde{Z}_i = Z_i - \hat{m}(R_i).
+\end{equation}
+If $R^2(Z_r \mid R) \approx 1$, the background representation $R_i$ explains almost all variation in $Z_{i,r}$, leaving no residual overlap $\tilde{Z}_{i,r}$ to identify $\theta_{0,r}$. As we show in Section~\ref{sec:multiconcept}, $R^2(Z_r \mid R) = 1.00$ also immediately flags when a practitioner has mistakenly used an orthogonal residual formula on non-orthogonal multi-concept directions.
+
+\subsection{Reduced-Rank Parameterization of \texorpdfstring{$R_i$}{R\_i} and Cross-Fitted DML}\label{sec:dml}
+
+A subtle linear-algebraic feature of Equation~\eqref{eq:R_i} is that while $R_i \in \mathbb{R}^d$ is written as a $d$-vector, it lies strictly in the $(d-k)$-dimensional subspace $\mathcal{S}_C^\perp$ because $U_k^\top R_i = 0$. Thus the sample covariance matrix of $R_i$ in $\mathbb{R}^d$ is always rank-deficient with rank at most $\min(n-1, d-k)$. Feeding the raw $d$-vector $R_i$ into an unregularized linear learner will fail due to singular design matrices.
+
+Instead, let $U_\perp \in \mathbb{R}^{d \times (d-k)}$ be an arbitrary orthonormal basis for $\mathcal{S}_C^\perp$ (computed via the QR decomposition or SVD of $I_d - P_{U_k}$, so $U_\perp^\top U_\perp = I_{d-k}$ and $U_k^\top U_\perp = 0$), and define the full-rank intrinsic complement coordinates
+\begin{equation}\label{eq:R_intrinsic}
+R_{\perp, i} = U_\perp^\top h_i \in \mathbb{R}^{d-k}, \qquad \text{so that } R_i = U_\perp R_{\perp, i}.
+\end{equation}
+We then estimate $\theta_0$ via $K$-fold cross-fitted Double/Debiased Machine Learning \citep{robinson1988root,chernozhukov2018double}:
+\begin{enumerate}
+    \item Randomly partition the observational sample $\{1, \dots, n\}$ into $K$ equal folds $I_1, \dots, I_K$ (e.g., $K = 5$).
+    \item For each fold $\ell \in \{1, \dots, K\}$, use the out-of-fold training set $I_\ell^c = \{1, \dots, n\} \setminus I_\ell$ to fit regularized machine learning estimators $\hat{g}_{-\ell}(R_{\perp, i})$ of $g_0(R_i) = \mathbb{E}[Y_i \mid R_{\perp, i}]$ and $\hat{m}_{-\ell}(R_{\perp, i})$ of $m_0(R_i) = \mathbb{E}[Z_i \mid R_{\perp, i}]$ (such as ridge regression, penalized splines, random forests, or kernel ridge regression).
+    \item For each $i \in I_\ell$, form the cross-fitted Neyman-orthogonal residuals:
+    \begin{equation}\label{eq:dml_residuals}
+    \tilde{Y}_i = Y_i - \hat{g}_{-\ell}(R_{\perp, i}), \qquad \tilde{Z}_i = Z_i - \hat{m}_{-\ell}(R_{\perp, i}).
+    \end{equation}
+    \item Compute the DML estimator and its heteroskedasticity-robust sandwich covariance matrix:
+    \begin{equation}\label{eq:dml_estimator}
+    \hat{\theta}_{\mathrm{DML}} = \left(\frac{1}{n}\sum_{i=1}^n \tilde{Z}_i \tilde{Z}_i^\top\right)^{-1} \left(\frac{1}{n}\sum_{i=1}^n \tilde{Z}_i \tilde{Y}_i\right),
+    \end{equation}
+    \begin{equation}\label{eq:dml_vcov}
+    \widehat{\mathrm{Var}}(\hat{\theta}_{\mathrm{DML}}) = \frac{1}{n} \hat{J}^{-1} \left(\frac{1}{n}\sum_{i=1}^n \hat{e}_i^2 \tilde{Z}_i \tilde{Z}_i^\top\right) \hat{J}^{-1}, \qquad \hat{J} = \frac{1}{n}\sum_{i=1}^n \tilde{Z}_i \tilde{Z}_i^\top, \quad \hat{e}_i = \tilde{Y}_i - \tilde{Z}_i^\top \hat{\theta}_{\mathrm{DML}}.
+    \end{equation}
+\end{enumerate}
+Provided the nuisance learners achieve the product rate condition $\|\hat{g}_{-\ell} - g_0\|_{L_2} \cdot \|\hat{m}_{-\ell} - m_0\|_{L_2} = o_P(n^{-1/2})$ and Assumptions~\ref{ass:unconfoundedness}--\ref{ass:overlap} hold, $\sqrt{n}(\hat{\theta}_{\mathrm{DML}} - \theta_0) \xrightarrow{d} \mathcal{N}(0, \Sigma_\theta)$ \citep{chernozhukov2018double}.
+
+\subsection{Multiple Concepts and Oblique Pseudoinverse Projections}\label{sec:multiconcept}
+
+Suppose a researcher wants to estimate the joint causal effects of $k$ distinct concepts $C_1, \dots, C_k$ (for instance, politeness $C_1$ and urgency $C_2$). In Stage~1, the researcher constructs a separate minimal-pair corpus for each concept and extracts $k$ unit-norm concept vectors $u_{C_1}, \dots, u_{C_k} \in \mathbb{R}^d$, stacking them into the matrix
+\begin{equation}\label{eq:U_multi}
+U_k = \begin{bmatrix} u_{C_1} & u_{C_2} & \cdots & u_{C_k} \end{bmatrix} \in \mathbb{R}^{d \times k}.
+\end{equation}
+Crucially, because each direction $u_{C_r}$ was estimated from its own minimal-pair set, \emph{the columns of $U_k$ are generally not mutually orthogonal}: $G_k = U_k^\top U_k \neq I_k$ (for example, polite edits and deferential edits may have inner product $u_{C_1}^\top u_{C_2} = \cos\theta \neq 0$).
+
+A major analytical pitfall is to apply the single-concept orthogonal formulas $Z_i^{\mathrm{naive}} = U_k^\top h_i$ and $R_i^{\mathrm{naive}} = (I_d - U_k U_k^\top)h_i$ when $U_k^\top U_k \neq I_k$. We record why this fails and state the exact oblique projection required for valid multi-concept DML.
+
+\begin{proposition}[Oblique Projection for Non-Orthogonal Multi-Concept Matrices]\label{prop:oblique}
+Suppose $U_k = [u_{C_1}, \dots, u_{C_k}] \in \mathbb{R}^{d \times k}$ has full column rank $k$, so its Gram matrix $G_k = U_k^\top U_k \in \mathbb{R}^{k \times k}$ is symmetric positive definite, with $G_k \neq I_k$. Suppose the structural outcome depends on the representation via $h_i = \sum_{r=1}^k Z_{i,r}^* u_{C_r} + R_i^*$ with $U_k^\top R_i^* = 0$. Then:
+\begin{enumerate}
+    \item[\emph{(a)}] \emph{Failure of the naive formula:} The matrix $I_d - U_k U_k^\top$ is not a projection onto $\mathrm{span}(U_k)^\perp$; specifically, $U_k^\top R_i^{\mathrm{naive}} = (I_k - G_k) U_k^\top h_i \neq 0$. Thus $R_i^{\mathrm{naive}}$ retains a linear combination of the target concept coordinates $Z_i^*$. In Stage~2 DML, conditioning on $R_i^{\mathrm{naive}}$ absorbs the concept signal ($R^2(Z \mid R^{\mathrm{naive}}) \to 1$ in the noiseless limit) and induces severe collinearity bias.
+    \item[\emph{(b)}] \emph{Exact oblique decomposition:} Define the Moore--Penrose pseudoinverse (dual basis) $U_k^+ = G_k^{-1} U_k^\top = (U_k^\top U_k)^{-1} U_k^\top \in \mathbb{R}^{k \times d}$ and the orthogonal projector $P_{U_k} = U_k (U_k^\top U_k)^{-1} U_k^\top \in \mathbb{R}^{d \times d}$. Then the unique decomposition $h_i = U_k Z_i + R_i$ with $R_i \in \mathrm{span}(U_k)^\perp$ is given by
+    \begin{equation}\label{eq:oblique_projection}
+    Z_i = (U_k^\top U_k)^{-1} U_k^\top h_i \in \mathbb{R}^k, \qquad R_i = \big(I_d - U_k (U_k^\top U_k)^{-1} U_k^\top\big) h_i \in \mathbb{R}^d.
+    \end{equation}
+    Under~\eqref{eq:oblique_projection}, $Z_i = Z_i^*$, $U_k^\top R_i = 0$, $P_{U_k}^2 = P_{U_k}$, and the $r$-th coordinate $Z_{i,r}$ measures the partial shift along $u_{C_r}$ holding the remaining $k-1$ concept directions $u_{C_{-r}}$ and the orthogonal complement $R_i$ fixed.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+For any $h_i \in \mathbb{R}^d$, decomposing $h_i = U_k Z_i + R_i$ with $U_k^\top R_i = 0$ requires $U_k^\top h_i = (U_k^\top U_k) Z_i + U_k^\top R_i = G_k Z_i$. Since $\mathrm{rank}(U_k) = k$, $G_k$ is invertible, yielding $Z_i = G_k^{-1} U_k^\top h_i$ and $R_i = h_i - U_k Z_i = (I_d - U_k G_k^{-1} U_k^\top)h_i$, which verifies $U_k^\top R_i = U_k^\top h_i - G_k G_k^{-1} U_k^\top h_i = 0$. By contrast, under $R_i^{\mathrm{naive}} = (I_d - U_k U_k^\top)h_i$, pre-multiplying by $U_k^\top$ gives $U_k^\top R_i^{\mathrm{naive}} = (I_k - G_k) U_k^\top h_i$, which vanishes for all $h_i$ if and only if $G_k = I_k$.
+\end{proof}
+
+Proposition~\ref{prop:oblique} also clarifies what happens when two concepts $C_1$ and $C_2$ are nearly collinear in representation space ($|u_{C_1}^\top u_{C_2}| \to 1$): the Gram condition number $\kappa(G_k) = \lambda_{\max}(G_k)/\lambda_{\min}(G_k)$ explodes, inflating the variance of $(U_k^\top U_k)^{-1}U_k^\top h_i$. This is a transparent feature of the geometry: if two concepts move the neural representation along almost the exact same direction, no statistical method can separately identify their partial effects without independent variation.
+
+\section{Relationship to Existing Approaches}
+
+Our two-stage subspace projection framework connects and extends three distinct literatures:
+\begin{enumerate}
+    \item \textbf{Latent treatment discovery in text causal inference.} \citet{fong2016discovery,fong2023causal}, \citet{egami2022make}, and \citet{feder2022causal} formalize causal inference with latent text treatments discovered via unsupervised topic models or split-sample supervision. Discovery methods excel at exploratory hypothesis generation, but the discovered factors rarely align cleanly with a pre-specified theoretical concept $C$; a discovered ``politeness'' topic typically bundles domain vocabulary and sender demographics. Our Stage~1 uses researcher-designed contrastive minimal pairs to pin down the exact subspace of a targeted concept prior to seeing outcomes.
+    \item \textbf{Causal representation learning and probing.} \citet{veitch2020adapting}, \citet{pryzant2021causal}, \citet{ravfogel2020null}, and \citet{elazar2021amnesic} use supervised classifiers or iterative nullspace projection (INLP) on observational texts to remove or isolate concept directions. Because observational concept labels are correlated with background confounders $W$, probing classifiers trained on observational corpora absorb confounding directions into the probe weights \citep{belinkov2022probing}. By estimating $U_k$ from controlled minimal pairs where $W$ is held fixed by design, Stage~1 avoids observational probe contamination.
+    \item \textbf{Mechanistic interpretability and representation engineering.} \citet{turner2023activation}, \citet{zou2023representation}, \citet{li2023inference}, and \citet{rimsky2023steering} extract steering vectors from contrastive prompts to control LLM behavior. We contribute formal causal identification results, show why uncentered PCA fails under high-variance nuisance edit noise, derive the oblique projection required for multi-concept control, add round-trip decoding and Stage-2 overlap diagnostics, and establish valid semiparametric inference.
+\end{enumerate}
+
+\section{Practical Complications and Statistical Inference}\label{sec:inference}
+
+\subsection{Layer Selection and Representation Choice}
+
+Transformer models contain dozens of layers, and concept linearity varies across depth: early layers encode lexical surface tokens, middle-to-late layers typically show the highest linear separability for abstract semantic and stylistic concepts, and the final layer is heavily warped toward next-token prediction \citep{alain2016understanding,zou2023representation}. Crucially, layer selection belongs strictly inside Stage~1: the researcher evaluates the Stage~1 diagnostics (signal concentration $R_k^2$, split-half stability, and cross-domain transfer) across candidate layers using only $\mathcal{D}_{\mathrm{pairs}}$ and locks the layer $\ell^*$ before ever touching the outcome sample $\mathcal{D}_{\mathrm{obs}}$. Selecting a layer to maximize the Stage~2 $t$-statistic on $Y$ invalidates inference.
+
+\subsection{Nonlinear or Context-Bound Concepts and Sparse Autoencoders}
+
+Not every concept forms a global linear subspace. Some concepts may lie on a curved manifold, or act as different linear directions in different topical clusters. When Stage~1 split-half stability passes within domains but out-of-domain transfer fails across domains, the researcher can estimate domain-specific subspaces $U_k^{(g)}$ and conduct domain-stratified Stage~2 estimation. Alternatively, dictionary-learning representations such as Sparse Autoencoders (SAEs; \citealp{cunningham2023sparse}) decompose $h(T)$ into an overcomplete non-negative basis; our two-stage logic applies directly by using minimal pairs in Stage~1 to verify whether concept $C$ concentrates on a sparse subset of dictionary features and controlling for the remaining active features in Stage~2.
+
+\subsection{Split-Sample Validity and Stage-1 Estimation Uncertainty}
+
+Because $\hat{U}_k$ is estimated from $m$ minimal pairs in Stage~1 and then plugged into Stage~2 on $n$ observational units, how does Stage~1 estimation error affect Stage~2 standard errors and confidence intervals? The answer depends cleanly on whether the minimal pairs are drawn from an external sample and whether the target parameter is defined relative to the locked subspace $\hat{U}_k$ or a latent population subspace $U_k^*$.
+
+\begin{proposition}[Split-Sample Validity and Davis--Kahan Perturbation Bound]\label{prop:inference}
+Suppose the minimal-pair sample $\mathcal{D}_{\mathrm{pairs}}$ (of size $m$) and the observational outcome sample $\mathcal{D}_{\mathrm{obs}}$ (of size $n$) are independent ($\mathcal{D}_{\mathrm{pairs}} \perp \mathcal{D}_{\mathrm{obs}}$). Suppose the representation outcome model satisfies $Y_i = \beta_h^\top h_i + \tilde{g}_0(R_i^*) + \xi_i$ with $\mathbb{E}[\xi_i \mid h_i] = 0$ and $\|\beta_h\|_2 \le B < \infty$.
+\begin{enumerate}
+    \item[\emph{(a)}] \emph{Exact conditional validity for the locked-subspace estimand:} Define the subspace-conditional causal parameter $\theta_0(\hat{U}_k)$ as the partially linear projection slope of $Y_i$ on $Z_i(\hat{U}_k) = \hat{U}_k^\top h_i$ controlling for $R_i(\hat{U}_k) = (I_d - P_{\hat{U}_k})h_i$. Conditional on $\mathcal{D}_{\mathrm{pairs}}$, $\hat{U}_k$ is a fixed non-random matrix. Under the standard DML regularity conditions of Section~\ref{sec:dml},
+    \begin{equation}\label{eq:conditional_normality}
+    \Sigma_\theta(\hat{U}_k)^{-1/2} \sqrt{n}\big(\hat{\theta}_{\mathrm{DML}}(\hat{U}_k) - \theta_0(\hat{U}_k)\big) \;\Big|\; \mathcal{D}_{\mathrm{pairs}} \;\xrightarrow{d}\; \mathcal{N}(0, I_k),
+    \end{equation}
+    so nominal $(1-\alpha)$ DML sandwich confidence intervals achieve exact asymptotic coverage $1-\alpha$ for $\theta_0(\hat{U}_k)$ for any fixed $m$ that passes Stage~1.
+    \item[\emph{(b)}] \emph{Convergence to the population subspace parameter:} Suppose $\hat{U}_k$ estimates a population orthonormal basis $U_k^*$ (arranged with aligned principal coordinates, or $k=1$ with positive polarity). For $k = 1$ using $\hat{u}_{\mathrm{mean}}$, $\|\hat{u}_{\mathrm{mean}} - u_C^*\|_2 = O_P(m^{-1/2} / \|\mu_\alpha\|_2)$. More generally, for an eigenvector basis of a population matrix with eigengap $\delta_k = \lambda_k - \lambda_{k+1} > 0$, the Davis--Kahan $\sin\Theta$ theorem \citep{davis1970rotation} yields
+    \begin{equation}\label{eq:davis_kahan}
+    \|P_{\hat{U}_k} - P_{U_k^*}\|_{\mathrm{op}} = O_P\left(\frac{m^{-1/2}}{\delta_k}\right).
+    \end{equation}
+    Consequently, $|\theta_0(\hat{u}_C) - \theta_0(u_C^*)| \le \|\beta_h\|_2 \|\hat{u}_C - u_C^*\|_2 + O_P(\|\hat{u}_C - u_C^*\|_2) = O_P(m^{-1/2}/\delta_1)$. Whenever $\sqrt{n}/(m^{1/2}\delta_k) \to 0$, Stage~1 subspace error is asymptotically negligible relative to Stage~2 sampling error; otherwise, a two-stage pairs-plus-observations bootstrap accounts for both sources of uncertainty.
+\end{enumerate}
+\end{proposition}
+
+Proposition~\ref{prop:inference} explains why the Stage~1 diagnostic gate is directly tied to Stage~2 inferential validity: a large Stage~1 eigengap $\delta_k$ (or large mean shift $\|\mu_\alpha\|_2$) and high split-half stability guarantee that $\|P_{\hat{U}_k} - P_{U_k^*}\|_{\mathrm{op}}$ is small, ensuring that the locked-subspace estimand $\theta_0(\hat{U}_k)$ closely approximates the underlying population concept effect $\theta_0(U_k^*)$.
+
+\section{Monte Carlo Evidence}\label{sec:simulations}
+
+To illustrate the theoretical results and demonstrate the failure modes identified in Sections~\ref{sec:stage1} and \ref{sec:designB}, we conduct a Monte Carlo study ($400$ replications) with representation dimension $d = 64$, $m = 80$ minimal pairs in Stage~1, and $n = 600$ observational units in Stage~2.
+
+\subsection{Stage 1: Mean Concept Shift versus Nuisance Edit Noise}
+
+We evaluate three minimal-pair regimes in Stage~1:
+\begin{itemize}
+    \item \textbf{Clean low-rank shift:} $\Delta h_j = (1 + 0.2 \eta_j) u_{C_1}^* + \varepsilon_j$, where $\eta_j \sim \mathcal{N}(0,1)$ and $\varepsilon_j \sim \mathcal{N}(0, 0.15^2 I_d)$.
+    \item \textbf{High-variance nuisance edit noise:} $\Delta h_j = (1 + 0.15 \eta_j) u_{C_1}^* + 1.8 \zeta_j u_{\mathrm{nuis}} + \varepsilon_j$, where $\zeta_j \sim \mathcal{N}(0,1)$ represents a zero-mean incidental edit fluctuation (such as sentence length or formatting) along an orthogonal direction $u_{\mathrm{nuis}} \perp u_{C_1}^*$ whose variance ($1.8^2 = 3.24$) exceeds the squared mean shift ($1.0^2$).
+    \item \textbf{Dispersed / no subspace (reject):} $\Delta h_j$ is distributed randomly across $15$ orthogonal directions with zero mean shift, representing an incoherent or curved concept that violates the low-rank subspace hypothesis.
+\end{itemize}
+
+\begin{table}[t]
+\centering
+\caption{Stage 1 Minimal-Pair Diagnostics Across Edit Regimes ($d = 64, m = 80, 400$ Replications)}
+\label{tab:stage1}
+\vspace{0.5em}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\input{../tabs/table1_stage1.tex}
+\end{table}
+
+Table~\ref{tab:stage1} reports the average Stage~1 diagnostics. In the clean regime, both uncentered PCA ($\hat{u}_{\mathrm{PCA}}$) and the normalized mean shift ($\hat{u}_{\mathrm{mean}}$) recover the true concept direction $u_{C_1}^*$ with cosine similarity $0.99$ and split-half stability $0.97$. However, in the presence of high-variance zero-mean nuisance edit noise, uncentered PCA fails completely: $R_1^2 = 0.57$ looks deceptively strong, and split-half PCA stability is $0.97$, yet $\cos(\hat{u}_{\mathrm{PCA}}, u_{C_1}^*) = 0.07$ because the top eigenvector of $S = \frac{1}{m}DD^\top$ locks onto the high-variance nuisance direction $u_{\mathrm{nuis}}$! By contrast, the normalized mean shift $\hat{u}_{\mathrm{mean}}$ averages out the zero-mean nuisance fluctuation and achieves $\cos(\hat{u}_{\mathrm{mean}}, u_{C_1}^*) = 0.97$ with split-half stability $0.90$. Finally, in the dispersed regime, both $R_1^2 = 0.11$ and split-half stability ($0.19\text{--}0.21$) collapse, triggering the Stage~1 rejection gate before outcome estimation.
+
+\subsection{Stage 2: Confounding Adjustment and Multi-Concept Oblique Projection}
+
+In Stage~2, we generate observational representations $h_i = C_{1,i} u_{C_1}^* + \nu_i u_{\mathrm{nuis}} + \omega_i u_{\mathrm{conf}} + \epsilon_i$, where the latent concept $C_{1,i} = 0.8 \omega_i + 0.6 \nu_i + e_i$ is correlated with both the background confounder $\omega_i$ and the nuisance feature $\nu_i$, and the outcome is $Y_i = (\theta_1^* u_{C_1}^* + 1.2 u_{\mathrm{conf}} + 1.0 u_{\mathrm{nuis}})^\top h_i + \xi_i$ with true concept slope $\theta_1^* = 1.50$. For the multi-concept specification, we introduce a second concept direction $u_{C_2}^*$ at a $45^\circ$ angle to $u_{C_1}^*$ ($\cos\theta = u_{C_1}^{*\top} u_{C_2}^* = 0.71$) with true partial slope $\theta_2^* = -1.00$, comparing the naive orthogonal formula $Z_i = U_k^\top h_i, R_i = (I_d - U_k U_k^\top)h_i$ against the oblique pseudoinverse projection~\eqref{eq:oblique_projection} in 5-fold cross-fitted DML.
+
+\begin{table}[t]
+\centering
+\caption{Stage 2 Causal Estimation Performance ($n = 600, \theta_1^* = 1.50, 400$ Replications)}
+\label{tab:stage2}
+\vspace{0.5em}
+\small
+\setlength{\tabcolsep}{4.5pt}
+\input{../tabs/table2_stage2.tex}
+\end{table}
+
+Table~\ref{tab:stage2} confirms every theoretical prediction:
+\begin{enumerate}
+    \item \textbf{Omitted-variable bias without $R_i$:} Unadjusted OLS of $Y_i$ on $Z_i$ without controlling for the complement residual $R_i$ suffers severe confounding bias ($+0.773$) and $0\%$ confidence interval coverage.
+    \item \textbf{Consequence of uncentered PCA in Stage~1:} Running Stage~2 DML on the noise-corrupted uncentered PCA vector $\hat{u}_{\mathrm{PCA}}$ from Regime~B estimates the effect of the nuisance direction ($\approx 1.0$) rather than the concept ($\theta_1^* = 1.5$), yielding a bias of $-1.458$ relative to $\theta_1^*$ (or sign-flipped nuisance recovery).
+    \item \textbf{Valid recovery with $\hat{u}_{\mathrm{mean}}$:} Stage~2 DML using the mean-shift direction $\hat{u}_{\mathrm{mean}}$ and the reduced-rank complement basis $R_{\perp, i}$ achieves near-zero bias ($+0.004$), low RMSE ($0.047$), and nominal 95\% confidence interval coverage ($93.2\%$), while the first-stage overlap diagnostic $R^2(Z \mid R) = 0.43$ confirms healthy residual variation in $Z_i$.
+    \item \textbf{Catastrophic failure of orthogonal formulas on non-orthogonal concepts:} When two concepts have inner product $\cos\theta = 0.71$, applying the naive residual $R_i^{\mathrm{naive}} = (I_d - U_k U_k^\top)h_i$ leaves concept signal inside $R_i^{\mathrm{naive}}$. The Stage-2 overlap diagnostic immediately flags this bug: $R^2(Z \mid R) = 1.00$, and the DML estimate explodes (bias $+1547.2$, RMSE $46245.7$). Replacing the naive formula with the oblique pseudoinverse projection~\eqref{eq:oblique_projection} restores clean separation ($R^2(Z \mid R) = 0.16$), near-zero bias ($-0.002$), low RMSE ($0.037$), and nominal coverage ($93.8\%$).
+\end{enumerate}
+
+\section{Conclusion}
+
+High-dimensional treatments such as text, images, and audio force researchers to distinguish between the surface object an evaluator sees and the underlying concept a theory invokes. Pretrained foundation models offer a powerful geometric bridge: when an abstract concept maps to a low-dimensional linear subspace in representation space, we can decompose any object into low-dimensional concept coordinates and an orthogonal complement capturing background attributes.
+
+Yet representation geometry only yields credible causal inference when paired with statistical discipline. By separating the mean concept shift from zero-mean nuisance edit noise in Stage~1, enforcing falsifiable pre-outcome stability and transfer gates, requiring round-trip decoding verification for steered texts, using oblique pseudoinverse projections for non-orthogonal multi-concept treatments, and pairing reduced-rank complement controls with cross-fitted DML and overlap diagnostics in Stage~2, researchers can estimate the causal effect of one concept at a time---and know when the data refuse to support the question.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
