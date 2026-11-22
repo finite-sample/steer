@@ -1,0 +1,10 @@
+\begin{tabular}{@{}l rrrrc@{}}
+\toprule
+Concept / Placebo & $R_1^2$ & $\cos(\hat{u}_{\mathrm{PCA}}, \hat{u}_{\mathrm{mean}})$ & Split (Mean) & OOD Transfer & Gate \\
+\midrule
+Politeness (target, $m=60$) & 0.37 & 0.99 & 0.92 & 0.70 & Pass \\
+Urgency (2nd concept, $m=60$) & 0.61 & 1.00 & 0.98 & 0.83 & Pass \\
+Plurality (negative control, $m=30$) & 0.30 & 0.99 & 0.84 & -- & Pass \\
+Sign-flipped placebo ($m=60$) & 0.37 & 0.58 & 0.14 & 0.13 & Reject \\
+\bottomrule
+\end{tabular}

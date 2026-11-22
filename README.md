@@ -17,13 +17,15 @@ This repository implements a two-stage framework separating concept geometry fro
 
 ## Repository Structure
 
-- `ms/steer.tex`, `ms/references.bib`, `ms/steer.pdf`: LaTeX manuscript and compiled PDF.
+- `ms/steer.tex`, `ms/references.bib`, `ms/Makefile`, `ms/steer.pdf`: LaTeX manuscript (amended Kieran Healy XeLaTeX template) and compiled PDF.
 - `scripts/steer_simulation.py`: Monte Carlo simulation replicating Table 1 (Stage 1 diagnostics and rejection gate) and Table 2 (Stage 2 DML estimation and multi-concept oblique projection).
-- `tabs/table1_stage1.tex`, `tabs/table2_stage2.tex`: Generated LaTeX tables included in `ms/steer.tex`.
+- `scripts/empirical_politeness.py`: Empirical application and placebo suite on the Stanford Politeness Corpora (Wikipedia $N=4{,}353$ and Stack Exchange $N=6{,}603$) using frozen `all-MiniLM-L6-v2` ($d=384$), generating Table 3 and Table 4.
+- `tabs/table1_stage1.tex`, `tabs/table2_stage2.tex`, `tabs/table3_empirical_stage1.tex`, `tabs/table4_empirical_stage2.tex`: Generated LaTeX tables included in `ms/steer.tex`.
 
-## Reproducing the Simulation and Manuscript
+## Reproducing the Simulation, Empirical Application, and Manuscript
 
 ```bash
 python3 scripts/steer_simulation.py
-cd ms && pdflatex steer.tex && bibtex steer && pdflatex steer.tex && pdflatex steer.tex
+uv run --with sentence-transformers --with scikit-learn --with numpy python3 scripts/empirical_politeness.py
+cd ms && make
 ```

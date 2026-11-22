@@ -1,0 +1,24 @@
+\begin{tabular}{@{}l r r r r@{}}
+\toprule
+ & \multicolumn{2}{c}{Wikipedia ($N=4{,}353$)} & \multicolumn{2}{c}{Stack Exchange ($N=6{,}603$)} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+Specification / Placebo Check & $\hat{\theta}$ (SE) & $R^2(Z{\mid}R)$ & $\hat{\theta}$ (SE) & $R^2(Z{\mid}R)$ \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Panel A: Target Concept (Politeness, 1 SD)}} \\
+Unadjusted OLS (no $R_i$ control) & +0.275 (0.014) & -- & +0.014 (0.013) & -- \\
+5-fold DML (minimal-pair $\hat{u}_{\mathrm{mean}}$) & +0.202 (0.020) & 0.64 & +0.065 (0.020) & 0.62 \\
+Oblique Multi-DML (Politeness $|$ Urgency) & +0.203 (0.020) & 0.63 & +0.066 (0.020) & 0.62 \\
+Naive Multi-DML (broken $U_k^\top h_i$) & +1.900 (0.232) & 1.00 & +0.853 (0.305) & 1.00 \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Panel B: Comparisons Against Baselines}} \\
+Cross-corpus supervised probe (DML) & +0.420 (0.025) & 0.76 & +0.319 (0.025) & 0.74 \\
+Implicit-only subset (0 keywords; ours) & +0.154 (0.021) & 0.62 & +0.060 (0.022) & 0.63 \\
+\midrule
+\multicolumn{5}{@{}l}{\emph{Panel C: Placebo Checks (Expected Null)}} \\
+Negative-control concept: Plurality (OLS) & +0.041 (0.015) & -- & +0.014 (0.012) & -- \\
+Negative-control concept: Plurality (DML) & -0.009 (0.019) & 0.61 & -0.002 (0.019) & 0.61 \\
+Outcome permutations (20$\times$, reject@5\%) & 0.0\% & -- & 0.0\% & -- \\
+Random $\perp$ directions (20$\times$, OLS reject@5\%) & 70.0\% & -- & 50.0\% & -- \\
+Random $\perp$ directions (20$\times$, DML reject@5\%) & 5.0\% & -- & 5.0\% & -- \\
+\bottomrule
+\end{tabular}

@@ -512,6 +512,53 @@ Table~\ref{tab:stage2} and Figure~\ref{fig:simulation}B confirm every theoretica
     \item \textbf{Catastrophic failure of orthogonal formulas on non-orthogonal concepts:} When two concepts have inner product $\cos\theta = 0.71$, applying the naive residual $R_i^{\mathrm{naive}} = (I_d - U_k U_k^\top)h_i$ leaves concept signal inside $R_i^{\mathrm{naive}}$. The Stage-2 overlap diagnostic immediately flags this bug: $R^2(Z \mid R) = 1.00$, and the DML estimate explodes (bias $+1547.2$, RMSE $46245.7$). Replacing the naive formula with the oblique pseudoinverse projection~\eqref{eq:oblique_projection} restores clean separation ($R^2(Z \mid R) = 0.16$), near-zero bias ($-0.002$), low RMSE ($0.037$), and nominal coverage ($93.8\%$).
 \end{enumerate}
 
+\section{Empirical Application: Politeness in Online Requests}\label{sec:empirical}
+
+To demonstrate the framework on real text and real human outcomes---without requiring a frontier language model---we apply the two-stage pipeline to the Stanford Politeness Corpora \citep{danescu2013computational}, consisting of $N = 4{,}353$ Wikipedia editor talk-page requests and $N = 6{,}603$ Stack Exchange technical Q\&A requests, each paired with a crowd-annotated continuous politeness rating (standardized to mean $0$, SD $1$). As our frozen representation map $h(\cdot)$, we use the lightweight pretrained encoder \texttt{all-MiniLM-L6-v2} (22M parameters, $d = 384$).
+
+\subsection{Stage 1: External Minimal Pairs and Pre-Outcome Gate}
+
+Independent of both observational corpora, we construct $m = 60$ contrastive minimal pairs for \textbf{Politeness} across three distinct request domains (20 workplace emails, 20 technical queries, 20 everyday requests), shifting direct imperatives to polite requests while holding task content and urgency fixed. To test multi-concept oblique projection and falsification gates, we also construct $m = 60$ minimal pairs for \textbf{Urgency}, $m = 30$ minimal pairs for a negative-control grammatical concept---\textbf{Plurality} (singular versus plural nouns), which should form a clean linear direction in representation space yet have zero causal effect on perceived politeness---and a \textbf{Sign-Flipped Placebo} formed by randomly multiplying each politeness pair difference by $\pm 1$.
+
+\begin{table}[t]
+\centering
+\caption{Empirical Stage 1 Diagnostics on Frozen \texttt{all-MiniLM-L6-v2} ($d = 384$)}
+\label{tab:emp_stage1}
+\vspace{0.5em}
+\small
+\setlength{\tabcolsep}{4pt}
+\input{../tabs/table3_empirical_stage1.tex}
+\end{table}
+
+Table~\ref{tab:emp_stage1} reports the pre-outcome diagnostics. Politeness ($R_1^2 = 0.37$, split-half stability $0.92$, cross-domain transfer $0.70$), Urgency (split-half $0.98$, transfer $0.83$), and the Plurality negative control (split-half $0.84$) all pass the Stage~1 gate. By contrast, the sign-flipped placebo has the exact same $R_1^2 = 0.37$ as real politeness---confirming that uncentered second-moment $R_1^2$ alone cannot distinguish a directional concept from zero-mean edit variance---yet its mean-shift split-half stability ($0.14$) and out-of-domain transfer ($0.13$) collapse, causing Stage~1 to reject it before seeing any outcomes.
+
+\subsection{Stage 2: Observational DML, Baseline Comparisons, and Placebo Checks}
+
+We project all $4{,}353$ Wikipedia requests and $6{,}603$ Stack Exchange requests onto the locked Stage~1 direction $\hat{u}_{\mathrm{mean}}$ (standardized to 1-SD units) and estimate 5-fold cross-fitted DML controlling for the reduced-rank orthogonal complement $R_{\perp, i} \in \mathbb{R}^{383}$ via cross-validated ridge regression. Table~\ref{tab:emp_stage2} summarizes the main estimates, comparisons against standard baselines, and three Stage~2 placebo suites.
+
+\begin{table}[t]
+\centering
+\caption{Empirical Stage 2 Estimates, Baseline Comparisons, and Placebo Checks}
+\label{tab:emp_stage2}
+\vspace{0.5em}
+\small
+\setlength{\tabcolsep}{4pt}
+\input{../tabs/table4_empirical_stage2.tex}
+\end{table}
+
+Four findings stand out:
+\begin{enumerate}
+    \item \textbf{Confounding adjustment cuts both ways across corpora (Panel~A):} On Wikipedia, unadjusted OLS overstates the politeness effect ($+0.275$ vs.\ DML $+0.202$, $\mathrm{SE} = 0.020$). On Stack Exchange, topic and question-type confounding suppresses unadjusted OLS to near zero ($+0.014$, $\mathrm{SE} = 0.013$), whereas 5-fold DML controlling for $R_{\perp, i}$ recovers a statistically significant positive effect ($+0.065$, $\mathrm{SE} = 0.020$, $t = 3.2$).
+    \item \textbf{Proposition~\ref{prop:oblique} in real text (Panel~A):} Even though Politeness and Urgency have a modest inner product ($\cos\theta = 0.11$), applying the naive orthogonal residual formula $(I_d - U_2 U_2^\top)h_i$ inflates the Stage-2 overlap diagnostic to $R^2(Z_1 \mid R) = 1.00$ and blows up the multi-concept DML estimate by $9\text{--}13\times$ ($+1.900$ on Wikipedia, $+0.853$ on Stack Exchange). Switching to the oblique pseudoinverse projection~\eqref{eq:oblique_projection} restores clean separation ($R^2 = 0.62\text{--}0.63$) and exact recovery ($+0.203$ and $+0.066$).
+    \item \textbf{Comparison against standard baselines (Panel~B):}
+    \begin{itemize}
+        \item \emph{Versus lexical keyword proxies:} Explicit politeness markers (\texttt{please}, \texttt{thank}, \texttt{could you}, \texttt{would you}, \texttt{kindly}, \texttt{appreciate}) are absent from $82\%$ of Wikipedia requests ($3{,}578/4{,}353$) and $86\%$ of Stack Exchange requests ($5{,}647/6{,}603$), leaving keyword proxies undefined on most of the corpus. Restricted to these zero-keyword texts, our minimal-pair subspace DML still recovers highly significant effects of implicit politeness ($+0.154$, $\mathrm{SE}=0.021$ on Wikipedia; $+0.060$, $\mathrm{SE}=0.022$ on Stack Exchange).
+        \item \emph{Versus unsupervised latent discovery:} The top principal component of observational embeddings achieves only $36.7\%$ directional accuracy on controlled minimal pairs (worse than chance) and primarily tracks corpus domain ($|r| = 0.40$).
+        \item \emph{Versus cross-corpus observational probing:} Training a supervised ridge probe on the opposite corpus yields larger DML slopes ($+0.420$ and $+0.319$) because it directly fits the broader Stanford annotation rubric using thousands of labeled outcomes. However, it requires $4{,}353\text{--}6{,}603$ human labels (versus zero outcome labels in our Stage~1), absorbs $4\text{--}5\times$ more text-length correlation ($|r| = 0.11\text{--}0.13$ vs.\ $0.03$), and exhibits higher entanglement with background representations ($R^2(Z \mid R) = 0.74\text{--}0.76$ vs.\ $0.62\text{--}0.64$), inflating DML standard errors by $25\%$.
+    \end{itemize}
+    \item \textbf{Placebo checks validate DML size control (Panel~C):} For the negative-control \textbf{Plurality} direction (which passed Stage~1), unadjusted OLS produces a spurious positive effect on Wikipedia ($+0.041$, $\mathrm{SE}=0.015$, $t=2.7$), whereas 5-fold DML yields a clean null on both corpora ($-0.009$ and $-0.002$, $\mathrm{SE}=0.019$). Across $20$ random outcome permutations, DML rejects $0.0\%$ of the time. Most strikingly, across $20$ random unit directions orthogonal to politeness, unadjusted OLS suffers severe false-positive inflation---rejecting $70.0\%$ of random directions on Wikipedia and $50.0\%$ on Stack Exchange at $\alpha = 0.05$ due to representation anisotropy---whereas 5-fold DML controlling for $R_{\perp, i}$ achieves exact nominal $5.0\%$ rejection on both corpora.
+\end{enumerate}
+
 \section{Conclusion}
 
 High-dimensional treatments such as text, images, and audio force researchers to distinguish between the surface object an evaluator sees and the underlying concept a theory invokes. Pretrained foundation models offer a powerful geometric bridge: when an abstract concept maps to a low-dimensional linear subspace in representation space, we can decompose any object into low-dimensional concept coordinates and an orthogonal complement capturing background attributes.
