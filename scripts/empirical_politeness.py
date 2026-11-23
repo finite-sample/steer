@@ -1,9 +1,7 @@
 """Empirical application and placebo suite on Stanford Politeness Corpora.
 
-Evaluates the two-stage subspace DML framework using frozen all-MiniLM-L6-v2
-(22M parameters, d=384) on Wikipedia (N=4,353) and Stack Exchange (N=6,603)
-human-rated requests, with Stage 1 rejection tests, three Stage 2 placebo
-checks, and head-to-head comparisons against competing baselines.
+Generates tabs/table3_empirical_stage1.tex, tabs/table4_empirical_stage2.tex,
+tabs/macros_emp.tex, and figs/fig2_empirical.pdf from one computed source.
 """
 
 import json
@@ -12,14 +10,18 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
+from plot_style import ACCENT, AMBER, MUTED, TEAL, WARN, apply_style
 from sentence_transformers import SentenceTransformer
 from sklearn.linear_model import RidgeCV
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent if HERE.name == "scripts" else HERE
 TABS = ROOT / "tabs"
+FIGS = ROOT / "figs"
 TABS.mkdir(exist_ok=True)
+FIGS.mkdir(exist_ok=True)
 DATA_DIR = Path.home() / "AgentWork/scratch/finite-sample/steer/data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -370,7 +372,6 @@ def principal_angle_cos(u_a, u_b):
 
 
 def stage1_diagnostics(delta_h, domains=None, seed=42):
-    """Compute Stage 1 mean-shift direction, uncentered PCA, and gate stats."""
     rng = np.random.RandomState(seed)
     m, _ = delta_h.shape
     s_mat = (delta_h.T @ delta_h) / m
@@ -426,7 +427,6 @@ def stage1_diagnostics(delta_h, domains=None, seed=42):
 
 
 def dml_stage2(y, z, r_mat, n_folds=5, seed=42):
-    """5-fold cross-fitted DML with RidgeCV for g(R) and m(R)."""
     rng = np.random.RandomState(seed)
     n = len(y)
     if z.ndim == 1:
@@ -475,6 +475,52 @@ def ols_unadjusted(y, z):
     return beta, se
 
 
+def plot_empirical(rw, rs):
+    apply_style()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(7.2, 3.1), sharey=True)
+
+    rows = [
+        ("Placebo: Plurality (DML)", "dml_plu", MUTED, True),
+        ("Placebo: Plurality (OLS)", "ols_plu", WARN, False),
+        ("Implicit-only (0 keywords, DML)", "dml_implicit", TEAL, True),
+        ("Cross-corpus probe (DML)", "dml_probe", AMBER, True),
+        ("Oblique multi-DML (Pol | Urg)", "dml_obl", ACCENT, True),
+        ("Minimal-pair DML (ours)", "dml_pol", ACCENT, True),
+        ("Unadjusted OLS (no R)", "ols_pol", WARN, False),
+    ]
+    y_pos = np.arange(len(rows))
+
+    for ax, res, title in [
+        (ax1, rw, "A. Wikipedia requests (N = 4,353)"),
+        (ax2, rs, "B. Stack Exchange requests (N = 6,603)"),
+    ]:
+        ax.axvline(0.0, color=MUTED, linestyle="--", linewidth=0.9)
+        ax.axhline(1.5, color="#DDDDDD", linestyle="-", linewidth=0.7)
+        for idx, (_, key, col, is_dml) in enumerate(rows):
+            if is_dml:
+                est = float(res[key][0][0])
+                se = float(res[key][1][0])
+            else:
+                est, se = res[key]
+            ax.plot(
+                [est - 1.96 * se, est + 1.96 * se],
+                [idx, idx],
+                color=col,
+                linewidth=2.0,
+            )
+            ax.plot(est, idx, "o", color=col, markersize=4.8)
+        ax.set_xlim(-0.08, 0.50)
+        ax.set_xlabel("Estimated effect (SD per 1 SD in Z)")
+        ax.set_title(title, loc="left")
+        ax.tick_params(axis="y", length=0)
+
+    ax1.set_yticks(y_pos)
+    ax1.set_yticklabels([r[0] for r in rows], fontsize=8.2)
+    fig.tight_layout(w_pad=1.5)
+    fig.savefig(FIGS / "fig2_empirical.pdf")
+    plt.close(fig)
+
+
 def run_empirical():
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
@@ -495,7 +541,7 @@ def run_empirical():
     s1_plu = stage1_diagnostics(dh_plu)
     s1_rnd = stage1_diagnostics(dh_rand, POLITE_DOMAINS)
 
-    # Write Table 3 (Empirical Stage 1 diagnostics)
+    # Write Table 3
     t3_hdr = (
         r"Concept / Placebo & $R_1^2$ & "
         r"$\cos(\hat{u}_{\mathrm{PCA}}, \hat{u}_{\mathrm{mean}})$ & "
@@ -532,6 +578,7 @@ def run_empirical():
     u_pol = s1_pol["u_mean"]
     u_urg = s1_urg["u_mean"]
     u_plu = s1_plu["u_mean"]
+    cos_pol_urg = principal_angle_cos(u_pol, u_urg)
 
     alphas = np.logspace(-2, 4, 13)
     w_wiki = RidgeCV(alphas=alphas).fit(h_wiki, y_wiki).coef_
@@ -539,18 +586,32 @@ def run_empirical():
     w_se = RidgeCV(alphas=alphas).fit(h_se, y_se).coef_
     u_probe_se = w_se / np.linalg.norm(w_se)
 
+    # Pooled confounder-leakage metrics (text length & domain)
+    h_all = np.vstack([h_wiki, h_se])
+    dom_all = np.concatenate([np.zeros(len(t_wiki)), np.ones(len(t_se))])
+    len_all = np.log1p(
+        np.array([len(t.split()) for t in t_wiki + t_se], dtype=float)
+    )
+    r_len_ours = abs(float(np.corrcoef(h_all @ u_pol, len_all)[0, 1]))
+    r_len_pw = abs(float(np.corrcoef(h_all @ u_probe_wiki, len_all)[0, 1]))
+    r_len_ps = abs(float(np.corrcoef(h_all @ u_probe_se, len_all)[0, 1]))
+
+    hc_w = h_wiki - h_wiki.mean(axis=0)
+    _, _, vt_w = np.linalg.svd(hc_w, full_matrices=False)
+    u_pc_wiki = vt_w[0]
+    pc_pair_acc = 100.0 * float(np.mean((dh_pol @ u_pc_wiki) > 0))
+    pc_dom_r = abs(float(np.corrcoef(h_all @ u_pc_wiki, dom_all)[0, 1]))
+
     def eval_corpus(texts, h_mat, y_vec, u_probe_ood):
-        n, d = h_mat.shape
+        _, d = h_mat.shape
         out = {}
 
-        # Main: Politeness (1 SD)
         zp_raw = h_mat @ u_pol
         zp = zp_raw / np.std(zp_raw)
         rp = h_mat - np.outer(zp_raw, u_pol)
         out["ols_pol"] = ols_unadjusted(y_vec, zp)
         out["dml_pol"] = dml_stage2(y_vec, zp, rp)
 
-        # Multi-concept: Oblique vs Naive
         u_m = np.column_stack([u_pol, u_urg])
         u_dual = u_m @ np.linalg.inv(u_m.T @ u_m)
         zo_raw = h_mat @ u_dual
@@ -563,13 +624,11 @@ def run_empirical():
         zn = zn_raw / np.std(zn_raw, axis=0)
         out["dml_nav"] = dml_stage2(y_vec, zn, rn)
 
-        # Baseline: Cross-corpus observational probe
         zpr_raw = h_mat @ u_probe_ood
         zpr = zpr_raw / np.std(zpr_raw)
         rpr = h_mat - np.outer(zpr_raw, u_probe_ood)
         out["dml_probe"] = dml_stage2(y_vec, zpr, rpr)
 
-        # Baseline: Lexical keywords + implicit-only subset
         counts = [len(POLITE_RE.findall(t)) for t in texts]
         lex_cnt = np.array(counts, dtype=float)
         no_kw = lex_cnt == 0
@@ -579,15 +638,14 @@ def run_empirical():
         rs = hs - np.outer(zs_raw, u_pol)
         out["dml_implicit"] = dml_stage2(ys, zs, rs)
         out["n_implicit"] = int(no_kw.sum())
+        out["pct_implicit"] = 100.0 * float(np.mean(no_kw))
 
-        # Placebo 1: Plurality (negative-control concept)
         zpl_raw = h_mat @ u_plu
         zpl = zpl_raw / np.std(zpl_raw)
         rpl = h_mat - np.outer(zpl_raw, u_plu)
         out["ols_plu"] = ols_unadjusted(y_vec, zpl)
         out["dml_plu"] = dml_stage2(y_vec, zpl, rpl)
 
-        # Placebo 2: 20 outcome permutations
         rng_p = np.random.RandomState(123)
         p_rej = []
         for p_i in range(20):
@@ -596,7 +654,6 @@ def run_empirical():
             p_rej.append(abs(float(th_p[0]) / float(se_p[0])) > 1.96)
         out["perm_rej"] = 100.0 * float(np.mean(p_rej))
 
-        # Placebo 3: 20 random directions orthogonal to u_pol
         ols_rej, dml_rej = [], []
         for r_i in range(20):
             v = rng_p.randn(d)
@@ -679,9 +736,83 @@ def run_empirical():
     t4_path = TABS / "table4_empirical_stage2.tex"
     t4_path.write_text("\n".join(t4_lines) + "\n")
 
-    print("\n".join(t3_lines))
-    print()
-    print("\n".join(t4_lines))
+    # Emit macros_emp.tex so prose never hand-types empirical numbers
+    macros = [
+        f"\\newcommand{{\\empNWiki}}{{{len(t_wiki):,}}}",
+        f"\\newcommand{{\\empNSe}}{{{len(t_se):,}}}",
+        f"\\newcommand{{\\empPolROne}}{{{s1_pol['r2_1']:.2f}}}",
+        f"\\newcommand{{\\empPolSplit}}{{{s1_pol['split_mean']:.2f}}}",
+        f"\\newcommand{{\\empPolOod}}{{{s1_pol['ood_cos']:.2f}}}",
+        f"\\newcommand{{\\empUrgSplit}}{{{s1_urg['split_mean']:.2f}}}",
+        f"\\newcommand{{\\empUrgOod}}{{{s1_urg['ood_cos']:.2f}}}",
+        f"\\newcommand{{\\empPluSplit}}{{{s1_plu['split_mean']:.2f}}}",
+        f"\\newcommand{{\\empRndROne}}{{{s1_rnd['r2_1']:.2f}}}",
+        f"\\newcommand{{\\empRndSplit}}{{{s1_rnd['split_mean']:.2f}}}",
+        f"\\newcommand{{\\empRndOod}}{{{s1_rnd['ood_cos']:.2f}}}",
+        f"\\newcommand{{\\empCosPolUrg}}{{{cos_pol_urg:.2f}}}",
+        f"\\newcommand{{\\empWikiOls}}{{{rw['ols_pol'][0]:+.3f}}}",
+        f"\\newcommand{{\\empWikiDml}}{{{float(rw['dml_pol'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empWikiDmlSe}}{{{float(rw['dml_pol'][1][0]):.3f}}}",
+        f"\\newcommand{{\\empWikiRTwo}}{{{rw['dml_pol'][2][0]:.2f}}}",
+        f"\\newcommand{{\\empSeOls}}{{{rs['ols_pol'][0]:+.3f}}}",
+        f"\\newcommand{{\\empSeOlsSe}}{{{rs['ols_pol'][1]:.3f}}}",
+        f"\\newcommand{{\\empSeDml}}{{{float(rs['dml_pol'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empSeDmlSe}}{{{float(rs['dml_pol'][1][0]):.3f}}}",
+        f"\\newcommand{{\\empSeRTwo}}{{{rs['dml_pol'][2][0]:.2f}}}",
+        f"\\newcommand{{\\empWikiObl}}{{{float(rw['dml_obl'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empSeObl}}{{{float(rs['dml_obl'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empWikiNav}}{{{float(rw['dml_nav'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empSeNav}}{{{float(rs['dml_nav'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empWikiProbe}}{{{float(rw['dml_probe'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empWikiProbeSe}}{{{float(rw['dml_probe'][1][0]):.3f}}}",
+        f"\\newcommand{{\\empWikiProbeRTwo}}{{{rw['dml_probe'][2][0]:.2f}}}",
+        f"\\newcommand{{\\empSeProbe}}{{{float(rs['dml_probe'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empSeProbeRTwo}}{{{rs['dml_probe'][2][0]:.2f}}}",
+        f"\\newcommand{{\\empWikiNoKwPct}}{{{rw['pct_implicit']:.0f}}}",
+        f"\\newcommand{{\\empWikiNoKwN}}{{{rw['n_implicit']:,}}}",
+        f"\\newcommand{{\\empSeNoKwPct}}{{{rs['pct_implicit']:.0f}}}",
+        f"\\newcommand{{\\empSeNoKwN}}{{{rs['n_implicit']:,}}}",
+        f"\\newcommand{{\\empWikiImp}}{{{float(rw['dml_implicit'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empWikiImpSe}}{{{float(rw['dml_implicit'][1][0]):.3f}}}",
+        f"\\newcommand{{\\empSeImp}}{{{float(rs['dml_implicit'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empSeImpSe}}{{{float(rs['dml_implicit'][1][0]):.3f}}}",
+        f"\\newcommand{{\\empPcPairAcc}}{{{pc_pair_acc:.1f}}}",
+        f"\\newcommand{{\\empPcDomR}}{{{pc_dom_r:.2f}}}",
+        f"\\newcommand{{\\empRLenOurs}}{{{r_len_ours:.2f}}}",
+        f"\\newcommand{{\\empRLenProbeLo}}{{{min(r_len_pw, r_len_ps):.2f}}}",
+        f"\\newcommand{{\\empRLenProbeHi}}{{{max(r_len_pw, r_len_ps):.2f}}}",
+        f"\\newcommand{{\\empWikiPluOls}}{{{rw['ols_plu'][0]:+.3f}}}",
+        f"\\newcommand{{\\empWikiPluOlsSe}}{{{rw['ols_plu'][1]:.3f}}}",
+        f"\\newcommand{{\\empWikiPluDml}}{{{float(rw['dml_plu'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empSePluDml}}{{{float(rs['dml_plu'][0][0]):+.3f}}}",
+        f"\\newcommand{{\\empWikiPluDmlSe}}{{{float(rw['dml_plu'][1][0]):.3f}}}",
+        f"\\newcommand{{\\empWikiRandOls}}{{{rw['rand_ols_rej']:.0f}}}",
+        f"\\newcommand{{\\empSeRandOls}}{{{rs['rand_ols_rej']:.0f}}}",
+        f"\\newcommand{{\\empWikiRandDml}}{{{rw['rand_dml_rej']:.0f}}}",
+        f"\\newcommand{{\\empSeRandDml}}{{{rs['rand_dml_rej']:.0f}}}",
+    ]
+    (TABS / "macros_emp.tex").write_text("\n".join(macros) + "\n")
+
+    # Write Appendix Table A1 (representative external minimal pairs)
+    ex_rows = [
+        ("Politeness (Workplace)", WORKPLACE_BASE[0][0], WORKPLACE_BASE[0][1]),
+        ("Politeness (Technical)", TECH_BASE[1][0], TECH_BASE[1][1]),
+        ("Politeness (Everyday)", EVERYDAY_BASE[3][0], EVERYDAY_BASE[3][1]),
+        ("Urgency (Workplace)", URGENT_PAIRS[0][0], URGENT_PAIRS[0][1]),
+        ("Plurality (Control)", PLURAL_PAIRS[0][0], PLURAL_PAIRS[0][1]),
+    ]
+    ta1 = [
+        r"\begin{tabular}{@{}l p{5.5cm} p{6.2cm}@{}}",
+        r"\toprule",
+        r"Concept (Domain) & Baseline ($T_j^-$) & Contrastive Edit ($T_j^+$) \\",
+        r"\midrule",
+    ]
+    for dom, neg_s, pos_s in ex_rows:
+        ta1.append(f"{dom} & {neg_s} & {pos_s} \\\\")
+    ta1.extend([r"\bottomrule", r"\end{tabular}"])
+    (TABS / "tableA1_pairs.tex").write_text("\n".join(ta1) + "\n")
+
+    plot_empirical(rw, rs)
 
 
 if __name__ == "__main__":
